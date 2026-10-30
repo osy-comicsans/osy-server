@@ -246,13 +246,15 @@ func (c *Consumer) SetMaxWait(wait time.Duration) {
 }
 
 func (c *Consumer) Fetch(ctx context.Context, batch int) ([]Delivery, error) {
-	messages, err := c.subscription.Fetch(batch, nats.Context(ctx), nats.MaxWait(c.maxWait))
+	fetchCtx, cancel := context.WithTimeout(ctx, c.maxWait)
+	defer cancel()
+	messages, err := c.subscription.Fetch(batch, nats.Context(fetchCtx))
 	if err != nil {
-		if errors.Is(err, nats.ErrTimeout) {
-			return nil, ErrNoMessages
-		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, ErrNoMessages
 		}
 		return nil, fmt.Errorf("fetch jetstream messages: %w", err)
 	}
