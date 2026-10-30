@@ -140,3 +140,32 @@ type DeadLetterInput struct {
 	Provider          string
 	ProviderMessageID string
 }
+
+type AccidentReport struct {
+	ID                int64     `json:"id"`
+	EventID           string    `json:"event_id"`
+	SMSMessageID      *int64    `json:"sms_message_id,omitempty"`
+	ProviderMessageID string    `json:"provider_message_id"`
+	Sender            string    `json:"sender"`
+	Latitude          float64   `json:"latitude"`
+	Longitude         float64   `json:"longitude"`
+	DamagePercentage  float64   `json:"damage_percentage"`
+	RadiusMeters      int       `json:"radius_meters"`
+	RawMessage        string    `json:"raw_message"`
+	CreatedAt         time.Time `json:"created_at"`
+}
+
+type EmergencyNotification struct {
+	ID               string     `json:"id"`
+	AccidentReportID int64      `json:"accident_report_id"`
+	Service          string     `json:"service"`
+	TargetPhone      string     `json:"target_phone"`
+	Message          string     `json:"message"`
+	Status           string     `json:"status"`
+	Attempts         int        `json:"attempts"`
+	LastError        *string    `json:"last_error,omitempty"`
+	TwilioSID        *string    `json:"twilio_sid,omitempty"`
+	SentAt           *time.Time `json:"sent_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+}

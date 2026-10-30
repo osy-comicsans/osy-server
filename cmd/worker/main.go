@@ -8,12 +8,14 @@ import (
 	"os/signal"
 	"syscall"
 
+	"osyn/internal/accident"
 	"osyn/internal/config"
 	"osyn/internal/database"
 	"osyn/internal/dlq"
 	"osyn/internal/messaging"
 	"osyn/internal/observability"
 	"osyn/internal/retry"
+	"osyn/internal/twilio"
 	"osyn/internal/worker"
 )
 
@@ -69,11 +71,32 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("create worker consumer: %w", err)
 	}
+	if err := cfg.ValidateNotifications(); err != nil {
+		return err
+	}
+	var sender worker.NotificationSender
+	if cfg.Twilio.DryRun {
+		sender = worker.NewDryRunSender(logger)
+	} else {
+		sender, err = twilio.NewClient(twilio.Config{
+			AccountSID:          cfg.Twilio.AccountSID,
+			AuthToken:           cfg.Twilio.AuthToken,
+			FromNumber:          cfg.Twilio.FromNumber,
+			MessagingServiceSID: cfg.Twilio.MessagingServiceSID,
+			BaseURL:             cfg.Twilio.BaseURL,
+			HTTPTimeout:         cfg.Twilio.HTTPTimeout,
+		})
+		if err != nil {
+			return err
+		}
+	}
 	retryPolicy := retry.New(cfg.Retry.InitialDelay, cfg.Retry.MaxDelay, cfg.Retry.MaxAttempts)
 	router := dlq.NewRouter(db, natsClient, cfg.NATS.DLQSubject)
-	handler := worker.NewHandler(db, router, cfg.Worker.MaxDeliveries, retryPolicy, logger)
+	notifier := worker.NewNotifier(db, sender, cfg.Notifications.Workers, logger)
+	targets := accident.DefaultTargets(cfg.Notifications.CivilProtectionPhone, cfg.Notifications.GendarmeriePhone, cfg.Notifications.PolicePhone)
+	handler := worker.NewHandler(db, router, notifier, targets, cfg.Notifications.MaxRadiusMeters, cfg.Worker.MaxDeliveries, retryPolicy, logger)
 	service := worker.NewService(consumer, handler, cfg.Worker.Concurrency, cfg.Worker.FetchWait, cfg.Worker.ProcessTimeout, logger)
-	logger.Info("worker started", "concurrency", cfg.Worker.Concurrency, "durable", cfg.Worker.ConsumerDurable)
+	logger.Info("worker started", "concurrency", cfg.Worker.Concurrency, "durable", cfg.Worker.ConsumerDurable, "notification_workers", cfg.Notifications.Workers, "twilio_dry_run", cfg.Twilio.DryRun)
 	if err := service.Run(ctx); err != nil {
 		return err
 	}

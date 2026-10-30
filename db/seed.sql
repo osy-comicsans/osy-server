@@ -1,8 +1,8 @@
 INSERT INTO sms_messages (
     provider, provider_message_id, sender, recipient, message, received_at
 ) VALUES
-    ('africastalking', '900001', '+254700000001', 'OSYN', 'First seeded message', now() - interval '2 minutes'),
-    ('africastalking', '900002', '+254700000002', 'OSYN', 'Second seeded message', now() - interval '1 minute')
+    ('africastalking', '900001', '+254700000001', 'OSYN', 'OSY|lat=36.7538|lon=3.0588|damage=75|radius=500', now() - interval '2 minutes'),
+    ('africastalking', '900002', '+254700000002', 'OSYN', 'OSY|lat=36.7754|lon=3.0588|damage=40|radius=1.2km', now() - interval '1 minute')
 ON CONFLICT (provider, provider_message_id) DO NOTHING;
 
 WITH event_id AS (

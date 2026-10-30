@@ -28,6 +28,8 @@ type Config struct {
 	Worker        Worker
 	Retry         Retry
 	Outbox        Outbox
+	Twilio        Twilio
+	Notifications Notifications
 }
 
 type AfricaTalking struct {
@@ -74,6 +76,24 @@ type Outbox struct {
 	PublishInterval time.Duration
 	BatchSize       int
 	Lease           time.Duration
+}
+
+type Twilio struct {
+	AccountSID          string
+	AuthToken           string
+	FromNumber          string
+	MessagingServiceSID string
+	BaseURL             string
+	HTTPTimeout         time.Duration
+	DryRun              bool
+}
+
+type Notifications struct {
+	Workers              int
+	MaxRadiusMeters      int
+	CivilProtectionPhone string
+	GendarmeriePhone     string
+	PolicePhone          string
 }
 
 func Load() (*Config, error) {
@@ -153,6 +173,22 @@ func Load() (*Config, error) {
 			BatchSize:       integer("OUTBOX_BATCH_SIZE", 100),
 			Lease:           duration("OUTBOX_LEASE", 30*time.Second),
 		},
+		Twilio: Twilio{
+			AccountSID:          env("TWILIO_ACCOUNT_SID", ""),
+			AuthToken:           env("TWILIO_AUTH_TOKEN", ""),
+			FromNumber:          env("TWILIO_FROM_NUMBER", ""),
+			MessagingServiceSID: env("TWILIO_MESSAGING_SERVICE_SID", ""),
+			BaseURL:             env("TWILIO_BASE_URL", "https://api.twilio.com"),
+			HTTPTimeout:         duration("TWILIO_HTTP_TIMEOUT", 15*time.Second),
+			DryRun:              boolValue("TWILIO_DRY_RUN", true),
+		},
+		Notifications: Notifications{
+			Workers:              integer("NOTIFICATION_WORKERS", 4),
+			MaxRadiusMeters:      integer("ACCIDENT_MAX_RADIUS_METERS", 100000),
+			CivilProtectionPhone: env("EMERGENCY_CIVIL_PROTECTION_PHONE", "14"),
+			GendarmeriePhone:     env("EMERGENCY_GENDARMERIE_PHONE", "1055"),
+			PolicePhone:          env("EMERGENCY_POLICE_PHONE", "1548"),
+		},
 	}
 
 	port, err := strconv.Atoi(cfg.HTTPPort)
@@ -231,6 +267,12 @@ func Load() (*Config, error) {
 	if cfg.ShutdownGrace <= 0 {
 		errs = append(errs, errors.New("SHUTDOWN_GRACE must be positive"))
 	}
+	if cfg.Notifications.Workers < 1 {
+		errs = append(errs, errors.New("NOTIFICATION_WORKERS must be positive"))
+	}
+	if cfg.Notifications.MaxRadiusMeters < 1 {
+		errs = append(errs, errors.New("ACCIDENT_MAX_RADIUS_METERS must be positive"))
+	}
 	cfg.validateProvider(&errs)
 	cfg.validateLogLevel(&errs)
 	cfg.validateURLs(&errs)
@@ -245,6 +287,64 @@ func (c *Config) ValidateProvider() error {
 	var errs []error
 	c.validateProvider(&errs)
 	return errors.Join(errs...)
+}
+
+func (c *Config) ValidateNotifications() error {
+	var errs []error
+	if strings.TrimSpace(c.Notifications.CivilProtectionPhone) == "" {
+		errs = append(errs, errors.New("EMERGENCY_CIVIL_PROTECTION_PHONE is required"))
+	}
+	if strings.TrimSpace(c.Notifications.GendarmeriePhone) == "" {
+		errs = append(errs, errors.New("EMERGENCY_GENDARMERIE_PHONE is required"))
+	}
+	if strings.TrimSpace(c.Notifications.PolicePhone) == "" {
+		errs = append(errs, errors.New("EMERGENCY_POLICE_PHONE is required"))
+	}
+	if c.Twilio.DryRun {
+		return errors.Join(errs...)
+	}
+	if strings.TrimSpace(c.Twilio.AccountSID) == "" {
+		errs = append(errs, errors.New("TWILIO_ACCOUNT_SID is required when TWILIO_DRY_RUN is false"))
+	}
+	if strings.TrimSpace(c.Twilio.AuthToken) == "" {
+		errs = append(errs, errors.New("TWILIO_AUTH_TOKEN is required when TWILIO_DRY_RUN is false"))
+	}
+	if strings.TrimSpace(c.Twilio.FromNumber) == "" && strings.TrimSpace(c.Twilio.MessagingServiceSID) == "" {
+		errs = append(errs, errors.New("TWILIO_FROM_NUMBER or TWILIO_MESSAGING_SERVICE_SID is required when TWILIO_DRY_RUN is false"))
+	}
+	if c.Twilio.FromNumber != "" && !isE164(c.Twilio.FromNumber) {
+		errs = append(errs, errors.New("TWILIO_FROM_NUMBER must be E.164"))
+	}
+	parsed, err := url.Parse(c.Twilio.BaseURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		errs = append(errs, errors.New("TWILIO_BASE_URL must be a valid http or https URL"))
+	}
+	if c.Twilio.HTTPTimeout <= 0 {
+		errs = append(errs, errors.New("TWILIO_HTTP_TIMEOUT must be positive"))
+	}
+	targets := map[string]string{
+		"EMERGENCY_CIVIL_PROTECTION_PHONE": c.Notifications.CivilProtectionPhone,
+		"EMERGENCY_GENDARMERIE_PHONE":      c.Notifications.GendarmeriePhone,
+		"EMERGENCY_POLICE_PHONE":           c.Notifications.PolicePhone,
+	}
+	for name, phone := range targets {
+		if phone != "" && !isE164(phone) {
+			errs = append(errs, fmt.Errorf("%s must be E.164 when TWILIO_DRY_RUN is false", name))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func isE164(phone string) bool {
+	if len(phone) < 8 || len(phone) > 16 || phone[0] != '+' || phone[1] == '0' {
+		return false
+	}
+	for _, char := range phone[1:] {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Config) validateProvider(errs *[]error) {
@@ -327,4 +427,16 @@ func int64Env(key string, fallback int64) (int64, error) {
 		return fallback, fmt.Errorf("%s: %w", key, err)
 	}
 	return parsed, nil
+}
+
+func boolValue(key string, fallback bool) bool {
+	value, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

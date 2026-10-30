@@ -55,6 +55,7 @@ PostgreSQL is the source of truth. NATS is never used as primary storage.
 - Docker with Docker Compose
 - Go 1.26 or newer for local development
 - Africa's Talking sandbox or production credentials
+- Twilio account, sender, and E.164 recipients for live emergency delivery
 - `make` for convenience targets
 
 ## Quick start
@@ -158,6 +159,18 @@ Docker services use the internal hostnames `postgres` and `nats`, which are alre
 | `WORKER_FETCH_WAIT` | `2s` | Pull fetch maximum wait |
 | `WORKER_PROCESS_TIMEOUT` | `25s` | Database processing timeout |
 | `WORKER_CONSUMER_DURABLE` | `osyn-worker` | Durable consumer name |
+| `NOTIFICATION_WORKERS` | `4` | Concurrent emergency notification senders |
+| `ACCIDENT_MAX_RADIUS_METERS` | `100000` | Maximum accepted accident radius |
+| `EMERGENCY_CIVIL_PROTECTION_PHONE` | `14` | Civil Protection destination |
+| `EMERGENCY_GENDARMERIE_PHONE` | `1055` | National Gendarmerie destination |
+| `EMERGENCY_POLICE_PHONE` | `1548` | National Police destination |
+| `TWILIO_DRY_RUN` | `true` | Log alerts without calling Twilio |
+| `TWILIO_ACCOUNT_SID` | required for live | Twilio account SID |
+| `TWILIO_AUTH_TOKEN` | required for live | Twilio auth token |
+| `TWILIO_FROM_NUMBER` | required for live | E.164 Twilio sender number |
+| `TWILIO_MESSAGING_SERVICE_SID` | optional | Alternative Twilio sender service |
+| `TWILIO_BASE_URL` | `https://api.twilio.com` | Twilio API origin |
+| `TWILIO_HTTP_TIMEOUT` | `15s` | Twilio HTTP timeout |
 | `RETRY_INITIAL_DELAY` | `2s` | First retry delay |
 | `RETRY_MAX_DELAY` | `5m` | Retry delay cap |
 | `RETRY_MAX_ATTEMPTS` | `5` | Retry attempt limit |
@@ -248,6 +261,118 @@ curl -X POST -H 'X-API-Key: change-me' \
   http://localhost:8080/api/v1/dlq/<dead-letter-uuid>/resolve
 ```
 
+## Structured accident reports
+
+Only SMS messages starting with `OSY` are accepted as accident reports. The message format is:
+
+```text
+OSY|lat=36.7538|lon=3.0588|damage=75|radius=500
+```
+
+Accepted aliases:
+
+- Latitude: `lat`, `latitude`
+- Longitude: `lon`, `lng`, `longitude`
+- Damage: `damage`, `damage_percentage`, `damage_percent`
+- Radius: `radius`, `range`, `radius_meters`
+
+Examples:
+
+```text
+OSY|lat=36.7538|lon=3.0588|damage=75%|radius=1.2km
+OSY;latitude=35.6971;longitude=-0.6308;damage=40;range=850m
+```
+
+Validation rules:
+
+- Latitude must be between `-90` and `90`.
+- Longitude must be between `-180` and `180`.
+- Damage percentage must be between `0` and `100`.
+- Radius must be between `1` meter and `ACCIDENT_MAX_RADIUS_METERS`.
+- Invalid reports are routed to the existing DLQ flow and are not deleted.
+
+The worker persists valid reports in `accident_reports`. It creates one emergency notification per configured recipient in `emergency_notifications`, then dispatches them through four concurrent notification workers. Notification writes are idempotent by `(accident_report_id, service)`.
+
+Recipients:
+
+| Service | Default number | Arabic role |
+| --- | --- | --- |
+| Civil Protection | `14` | Injuries, ambulance, fire, rescue |
+| National Gendarmerie | `1055` | Incidents outside urban police jurisdiction and road incidents |
+| National Police | `1548` | Incidents inside cities and urban areas |
+
+Each recipient receives a different formal Arabic message. Example:
+
+```text
+إلى الحماية المدنية:
+
+نحن منصة OSYN، تلقّينا بلاغاً عن حادث.
+مرجع البلاغ: 990001
+خط العرض: 36.753800
+خط الطول: 3.058800
+نسبة الأضرار التقديرية: 75.0%
+النطاق التقريبي: 500 متر
+الدور المطلوب: الاستجابة للإصابات والحرائق والإنقاذ.
+
+يرجى التحقق والتدخل العاجل.
+هذه رسالة آلية من منصة OSYN.
+```
+
+### Twilio delivery
+
+Dry-run is enabled by default. It logs and stores the exact Arabic messages without sending them.
+
+Live delivery requires:
+
+- A Twilio sender number or Messaging Service SID.
+- `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`.
+- `TWILIO_DRY_RUN=false`.
+- E.164 recipients in `EMERGENCY_*_PHONE`.
+
+Twilio does not accept local short emergency numbers such as `14`, `1055`, or `1548` as `To` values. For live delivery, configure the real E.164 routing numbers supplied by the receiving agencies. Never use the emergency numbers as a test destination.
+
+```env
+TWILIO_DRY_RUN=false
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+TWILIO_FROM_NUMBER=+1...
+EMERGENCY_CIVIL_PROTECTION_PHONE=+213...
+EMERGENCY_GENDARMERIE_PHONE=+213...
+EMERGENCY_POLICE_PHONE=+213...
+```
+
+### Test the accident pipeline
+
+The safest end-to-end test is to publish a structured event to NATS:
+
+```sh
+docker run --rm --network osyn_default natsio/nats-box:latest \
+  nats pub -s nats://nats:4222 sms.incoming \
+  '{"event_id":"accident-test-001","provider":"africastalking","provider_message_id":"990001","sender":"+213557708655","recipient":"19210","message":"OSY|lat=36.7538|lon=3.0588|damage=75|radius=500","received_at":"2026-10-30T16:00:00Z"}'
+```
+
+Inspect results:
+
+```sh
+docker compose logs -f worker
+
+docker compose exec postgres psql -U osyn -d osyn -c \
+  "SELECT * FROM accident_reports ORDER BY id DESC;"
+
+docker compose exec postgres psql -U osyn -d osyn -c \
+  "SELECT service, target_phone, status, attempts, twilio_sid FROM emergency_notifications ORDER BY id;"
+```
+
+For an invalid report test:
+
+```sh
+docker run --rm --network osyn_default natsio/nats-box:latest \
+  nats pub -s nats://nats:4222 sms.incoming \
+  '{"event_id":"accident-invalid-001","provider":"africastalking","provider_message_id":"990002","sender":"+213557708655","recipient":"19210","message":"OSY|lat=999|lon=3.0588|damage=150|radius=0","received_at":"2026-10-30T16:01:00Z"}'
+```
+
+The invalid event appears in `/api/v1/dlq`.
+
 ## Database
 
 SQL migrations live in `db/migrations` and are applied automatically, under an advisory lock, by every process at startup. Migrations are tracked in `schema_migrations`.
@@ -259,6 +384,8 @@ Core tables:
 - `outbox_events`
 - `processed_events`
 - `dead_letters`
+- `accident_reports`
+- `emergency_notifications`
 
 Inspect data:
 
