@@ -289,6 +289,41 @@
           "500": {"description": "Internal error", "schema": {"$ref": "#/definitions/ErrorEnvelope"}}
         }
       }
+    },
+    "/api/v1/me/documents": {
+      "get": {
+        "tags": ["Rider Documents"],
+        "summary": "List the rider's onboarding documents",
+        "operationId": "listDocuments",
+        "security": [{"UserAuth": []}],
+        "responses": {
+          "200": {"description": "Each required document and the onboarding status", "schema": {"$ref": "#/definitions/DocumentsResponse"}},
+          "401": {"description": "Missing, invalid, or expired access token", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "500": {"description": "Internal error", "schema": {"$ref": "#/definitions/ErrorEnvelope"}}
+        }
+      },
+      "post": {
+        "tags": ["Rider Documents"],
+        "summary": "Upload a driver's licence or car registration",
+        "description": "Replaces any earlier upload of the same type and sets it back to pending. The file and fields are stored encrypted.",
+        "operationId": "uploadDocument",
+        "consumes": ["multipart/form-data"],
+        "security": [{"UserAuth": []}],
+        "parameters": [
+          {"name": "type", "in": "formData", "required": true, "type": "string", "enum": ["driver_license", "vehicle_registration"]},
+          {"name": "source", "in": "formData", "required": true, "type": "string", "enum": ["scan", "upload"]},
+          {"name": "captureLanguage", "in": "formData", "required": true, "type": "string", "enum": ["fr", "ar"]},
+          {"name": "fields", "in": "formData", "required": true, "type": "string", "description": "JSON object of confirmed OCR values: up to 30 camelCase keys, each value 200 characters or fewer."},
+          {"name": "file", "in": "formData", "required": true, "type": "file", "description": "JPEG, PNG, or PDF of 10 MB or less."}
+        ],
+        "responses": {
+          "201": {"description": "Updated documents and onboarding status", "schema": {"$ref": "#/definitions/DocumentsResponse"}},
+          "400": {"description": "Body is not multipart/form-data", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "401": {"description": "Missing, invalid, or expired access token", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "422": {"description": "Invalid fields, named in error.fields", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "500": {"description": "Internal error", "schema": {"$ref": "#/definitions/ErrorEnvelope"}}
+        }
+      }
     }
   },
   "definitions": {
@@ -501,6 +536,22 @@
       "properties": {
         "accessToken": {"type": "string"},
         "refreshToken": {"type": "string"}
+      }
+    },
+    "Document": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "enum": ["driver_license", "vehicle_registration"]},
+        "status": {"type": "string", "enum": ["missing", "pending", "verified", "rejected"]},
+        "rejectionReason": {"type": "string", "x-nullable": true},
+        "updatedAt": {"type": "string", "format": "date-time", "x-nullable": true}
+      }
+    },
+    "DocumentsResponse": {
+      "type": "object",
+      "properties": {
+        "documents": {"type": "array", "items": {"$ref": "#/definitions/Document"}},
+        "onboardingStatus": {"type": "string", "enum": ["documents_required", "complete"]}
       }
     }
   }

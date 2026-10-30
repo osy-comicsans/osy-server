@@ -15,6 +15,7 @@ import (
 
 	"osyn/internal/auth"
 	"osyn/internal/database"
+	"osyn/internal/documents"
 	apihttp "osyn/internal/http"
 	"osyn/internal/http/handlers"
 	"osyn/internal/observability"
@@ -26,9 +27,10 @@ type fakeUser struct {
 }
 
 type fakeStore struct {
-	mu     sync.Mutex
-	users  map[string]fakeUser
-	tokens map[string]string
+	mu        sync.Mutex
+	users     map[string]fakeUser
+	tokens    map[string]string
+	documents map[string]map[string]database.DocumentStatus
 }
 
 func newFakeStore() *fakeStore {
@@ -101,19 +103,25 @@ func (s *fakeStore) RotateRefreshToken(_ context.Context, oldHash []byte, next d
 
 func newServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	service := auth.NewService(newFakeStore(), auth.Config{
+	store := newFakeStore()
+	service := auth.NewService(store, auth.Config{
 		Secret:     []byte("test-secret-that-is-at-least-32-bytes"),
 		AccessTTL:  time.Minute,
 		RefreshTTL: time.Hour,
 	})
+	documentService, err := documents.NewService(store, bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
 	logger := slog.New(slog.DiscardHandler)
 	server := httptest.NewServer(apihttp.NewRouter(apihttp.Dependencies{
-		Handlers: &handlers.Handler{},
-		Auth:     handlers.NewAuth(service, logger),
-		Users:    service,
-		APIKey:   "test-api-key",
-		Logger:   logger,
-		Metrics:  observability.NewMetrics(),
+		Handlers:  &handlers.Handler{},
+		Auth:      handlers.NewAuth(service, logger),
+		Documents: handlers.NewDocuments(documentService, logger),
+		Users:     service,
+		APIKey:    "test-api-key",
+		Logger:    logger,
+		Metrics:   observability.NewMetrics(),
 	}))
 	t.Cleanup(server.Close)
 	return server
@@ -151,6 +159,11 @@ func call(t *testing.T, server *httptest.Server, method, path, token string, bod
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
+	return send(t, server, request)
+}
+
+func send(t *testing.T, server *httptest.Server, request *http.Request) response {
+	t.Helper()
 	resp, err := server.Client().Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +171,7 @@ func call(t *testing.T, server *httptest.Server, method, path, token string, bod
 	defer resp.Body.Close()
 	var decoded map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		t.Fatalf("%s %s: decode response: %v", method, path, err)
+		t.Fatalf("%s %s: decode response: %v", request.Method, request.URL.Path, err)
 	}
 	return response{status: resp.StatusCode, body: decoded}
 }
@@ -340,6 +353,7 @@ func TestProtectedRoutes(t *testing.T) {
 		token string
 	}{
 		{name: "me without a token", path: "/api/v1/me"},
+		{name: "documents without a token", path: "/api/v1/me/documents"},
 		{name: "me with a malformed token", path: "/api/v1/me", token: "not-a-token"},
 		{name: "me with the API key", path: "/api/v1/me", token: "test-api-key"},
 		{name: "admin route with a user token", path: "/api/v1/stats", token: accessToken},

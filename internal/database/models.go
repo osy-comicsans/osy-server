@@ -78,6 +78,24 @@ type RefreshToken struct {
 	ExpiresAt time.Time
 }
 
+type NewDocument struct {
+	UserID           string
+	Type             string
+	Source           string
+	CaptureLanguage  string
+	MimeType         string
+	SizeBytes        int
+	FileCiphertext   []byte
+	FieldsCiphertext []byte
+}
+
+type DocumentStatus struct {
+	Type            string
+	Status          string
+	RejectionReason *string
+	UpdatedAt       time.Time
+}
+
 type UserConflict struct {
 	Email        bool
 	MobileNumber bool

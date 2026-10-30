@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
@@ -33,12 +34,17 @@ type Config struct {
 	Notifications Notifications
 	WhatsApp      WhatsApp
 	Auth          Auth
+	Documents     Documents
 }
 
 type Auth struct {
 	TokenSecret     string
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
+}
+
+type Documents struct {
+	EncryptionKey []byte
 }
 
 type AfricaTalking struct {
@@ -312,6 +318,13 @@ func Load() (*Config, error) {
 	if cfg.Auth.AccessTokenTTL <= 0 || cfg.Auth.RefreshTokenTTL <= 0 {
 		errs = append(errs, errors.New("AUTH_ACCESS_TOKEN_TTL and AUTH_REFRESH_TOKEN_TTL must be positive"))
 	}
+	if raw := env("DOCUMENTS_ENCRYPTION_KEY", ""); raw != "" {
+		key, err := base64.StdEncoding.DecodeString(raw)
+		if err != nil {
+			errs = append(errs, errors.New("DOCUMENTS_ENCRYPTION_KEY must be base64"))
+		}
+		cfg.Documents.EncryptionKey = key
+	}
 	cfg.validateProvider(&errs)
 	cfg.validateLogLevel(&errs)
 	cfg.validateURLs(&errs)
@@ -337,6 +350,16 @@ func (c *Config) ValidateAuth() error {
 		errs = append(errs, errors.New("AUTH_TOKEN_SECRET must not use the example value in production"))
 	}
 	return errors.Join(errs...)
+}
+
+func (c *Config) ValidateDocuments() error {
+	if len(c.Documents.EncryptionKey) != 32 {
+		return errors.New("DOCUMENTS_ENCRYPTION_KEY must be 32 bytes, base64 encoded")
+	}
+	if c.AppEnv == "production" && string(c.Documents.EncryptionKey) == "dev-only-documents-key-change-me" {
+		return errors.New("DOCUMENTS_ENCRYPTION_KEY must not use the example value in production")
+	}
+	return nil
 }
 
 func (c *Config) ValidateNotifications() error {

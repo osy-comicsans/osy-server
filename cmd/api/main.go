@@ -15,6 +15,7 @@ import (
 	"osyn/internal/config"
 	"osyn/internal/database"
 	"osyn/internal/dlq"
+	"osyn/internal/documents"
 	apihttp "osyn/internal/http"
 	"osyn/internal/http/handlers"
 	"osyn/internal/messaging"
@@ -34,6 +35,9 @@ func run() error {
 		return err
 	}
 	if err := cfg.ValidateAuth(); err != nil {
+		return err
+	}
+	if err := cfg.ValidateDocuments(); err != nil {
 		return err
 	}
 	logger := observability.NewLogger(cfg.LogLevel, cfg.AppName, "api")
@@ -65,15 +69,20 @@ func run() error {
 		AccessTTL:  cfg.Auth.AccessTokenTTL,
 		RefreshTTL: cfg.Auth.RefreshTokenTTL,
 	})
+	documentService, err := documents.NewService(db, cfg.Documents.EncryptionKey)
+	if err != nil {
+		return err
+	}
 	server := &http.Server{
 		Addr: ":" + cfg.HTTPPort,
 		Handler: apihttp.NewRouter(apihttp.Dependencies{
-			Handlers: handler,
-			Auth:     handlers.NewAuth(authService, logger),
-			Users:    authService,
-			APIKey:   cfg.APIKey,
-			Logger:   logger,
-			Metrics:  metrics,
+			Handlers:  handler,
+			Auth:      handlers.NewAuth(authService, logger),
+			Documents: handlers.NewDocuments(documentService, logger),
+			Users:     authService,
+			APIKey:    cfg.APIKey,
+			Logger:    logger,
+			Metrics:   metrics,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       cfg.HTTPTimeout,

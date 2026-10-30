@@ -20,12 +20,13 @@ import (
 const credentialAttemptsPerMinute = 20
 
 type Dependencies struct {
-	Handlers *handlers.Handler
-	Auth     *handlers.Auth
-	Users    middleware.AccessTokenVerifier
-	APIKey   string
-	Logger   *slog.Logger
-	Metrics  *observability.Metrics
+	Handlers  *handlers.Handler
+	Auth      *handlers.Auth
+	Documents *handlers.Documents
+	Users     middleware.AccessTokenVerifier
+	APIKey    string
+	Logger    *slog.Logger
+	Metrics   *observability.Metrics
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -86,6 +87,8 @@ func NewRouter(deps Dependencies) http.Handler {
 		api.Group(func(user chi.Router) {
 			user.Use(middleware.RequireUser(deps.Users))
 			user.Get("/me", deps.Auth.Me)
+			user.Get("/me/documents", deps.Documents.List)
+			user.Post("/me/documents", deps.Documents.Upload)
 		})
 	})
 	return router
