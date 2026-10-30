@@ -67,6 +67,8 @@ cp .env.example .env
 
 At minimum, set a real `AFRICASTALKING_API_KEY` and replace `API_KEY=change-me`.
 
+Sandbox and live credentials cannot be mixed. Sandbox requires `AFRICASTALKING_USERNAME=sandbox` and a sandbox API key against `https://api.sandbox.africastalking.com`. Live requires the application username and a live API key against `https://api.africastalking.com`. Newly generated API keys may take a few minutes to become active across all Africa's Talking endpoints.
+
 2. Start PostgreSQL, NATS JetStream, the API, fetcher, publisher, and worker.
 
 ```sh
@@ -123,7 +125,8 @@ Docker services use the internal hostnames `postgres` and `nats`, which are alre
 | `APP_ENV` | `development` | Runtime environment |
 | `APP_NAME` | `osyn` | Application name in logs and NATS connections |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
-| `HTTP_PORT` | `8080` | API listen port |
+| `HTTP_PORT` | `8080` | API container listen port |
+| `API_HOST_PORT` | `8080` | Host port mapped to the API |
 | `HTTP_TIMEOUT` | `15s` | HTTP server read/write timeout |
 | `SHUTDOWN_GRACE` | `20s` | Graceful API shutdown timeout |
 | `API_KEY` | required | Protects all `/api/v1` endpoints |
@@ -134,9 +137,12 @@ Docker services use the internal hostnames `postgres` and `nats`, which are alre
 | `FETCH_INTERVAL` | `10s` | Poll interval |
 | `FETCH_BATCH_SIZE` | `100` | Transaction batch size |
 | `DATABASE_URL` | required | PostgreSQL connection URL |
+| `POSTGRES_HOST_PORT` | `5432` | Host port mapped to PostgreSQL |
 | `DB_MAX_CONNS` | `20` | Connection pool maximum |
 | `MIGRATIONS_DIR` | `db/migrations` | SQL migration directory |
 | `NATS_URL` | required | NATS connection URL |
+| `NATS_HOST_PORT` | `4222` | Host port mapped to NATS |
+| `NATS_MONITOR_HOST_PORT` | `8222` | Host port mapped to NATS monitoring |
 | `NATS_SMS_STREAM` | `SMS_MESSAGES` | Durable incoming stream |
 | `NATS_SMS_SUBJECT` | `sms.incoming` | Incoming subject |
 | `NATS_DLQ_STREAM` | `SMS_DLQ` | Durable dead letter stream |

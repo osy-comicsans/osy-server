@@ -1,12 +1,14 @@
 package africastalking
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,15 +53,41 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("africastalking returned status %d: %s", e.StatusCode, e.Body)
 }
 
+type scalarString string
+
+func (s *scalarString) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(data, []byte("null")) {
+		*s = ""
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	switch typed := value.(type) {
+	case string:
+		*s = scalarString(typed)
+	case json.Number:
+		*s = scalarString(typed.String())
+	case bool:
+		*s = scalarString(strconv.FormatBool(typed))
+	default:
+		return fmt.Errorf("unsupported scalar value %T", value)
+	}
+	return nil
+}
+
 type fetchResponse struct {
 	SMSMessageData struct {
 		Messages []struct {
-			ID     string `json:"id"`
-			From   string `json:"from"`
-			To     string `json:"to"`
-			Text   string `json:"text"`
-			Date   string `json:"date"`
-			LinkID string `json:"linkId"`
+			ID     scalarString `json:"id"`
+			From   string       `json:"from"`
+			To     string       `json:"to"`
+			Text   string       `json:"text"`
+			Date   string       `json:"date"`
+			LinkID scalarString `json:"linkId"`
 		} `json:"Messages"`
 	} `json:"SMSMessageData"`
 }
@@ -138,20 +166,21 @@ func (c *Client) fetch(ctx context.Context, lastReceivedID string) ([]SMSMessage
 	}
 	messages := make([]SMSMessage, 0, len(payload.SMSMessageData.Messages))
 	for _, raw := range payload.SMSMessageData.Messages {
-		if strings.TrimSpace(raw.ID) == "" {
+		id := string(raw.ID)
+		if strings.TrimSpace(id) == "" {
 			return nil, retry.Permanent(fmt.Errorf("africastalking response contains a message without an id"))
 		}
 		receivedAt, err := parseDate(raw.Date)
 		if err != nil {
-			return nil, retry.Permanent(fmt.Errorf("parse message %s date: %w", raw.ID, err))
+			return nil, retry.Permanent(fmt.Errorf("parse message %s date: %w", id, err))
 		}
 		messages = append(messages, SMSMessage{
-			ID:     raw.ID,
+			ID:     id,
 			From:   raw.From,
 			To:     raw.To,
 			Text:   raw.Text,
 			Date:   receivedAt,
-			LinkID: raw.LinkID,
+			LinkID: string(raw.LinkID),
 		})
 	}
 	return messages, nil
