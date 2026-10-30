@@ -29,6 +29,7 @@ type Config struct {
 	Retry         Retry
 	Outbox        Outbox
 	Twilio        Twilio
+	CallMeBot     CallMeBot
 	Notifications Notifications
 	WhatsApp      WhatsApp
 	Auth          Auth
@@ -106,9 +107,14 @@ type Notifications struct {
 
 type WhatsApp struct {
 	Enabled bool
-	From    string
 	To      string
 	DryRun  bool
+}
+
+type CallMeBot struct {
+	APIKey      string
+	BaseURL     string
+	HTTPTimeout time.Duration
 }
 
 func Load() (*Config, error) {
@@ -206,7 +212,6 @@ func Load() (*Config, error) {
 		},
 		WhatsApp: WhatsApp{
 			Enabled: boolValue("WHATSAPP_NOTIFICATIONS_ENABLED", false),
-			From:    env("TWILIO_WHATSAPP_FROM", "whatsapp:+17372508034"),
 			To:      env("OPERATOR_WHATSAPP_NUMBER", ""),
 			DryRun:  boolValue("WHATSAPP_DRY_RUN", true),
 		},
@@ -214,6 +219,11 @@ func Load() (*Config, error) {
 			TokenSecret:     env("AUTH_TOKEN_SECRET", ""),
 			AccessTokenTTL:  duration("AUTH_ACCESS_TOKEN_TTL", 15*time.Minute),
 			RefreshTokenTTL: duration("AUTH_REFRESH_TOKEN_TTL", 30*24*time.Hour),
+		},
+		CallMeBot: CallMeBot{
+			APIKey:      env("CALLMEBOT_API_KEY", ""),
+			BaseURL:     env("CALLMEBOT_BASE_URL", "https://api.callmebot.com/whatsapp.php"),
+			HTTPTimeout: duration("CALLMEBOT_HTTP_TIMEOUT", 20*time.Second),
 		},
 	}
 
@@ -337,14 +347,17 @@ func (c *Config) ValidateNotifications() error {
 		} else if !isE164(c.WhatsApp.To) {
 			errs = append(errs, errors.New("OPERATOR_WHATSAPP_NUMBER must be E.164"))
 		}
-		if !strings.HasPrefix(c.WhatsApp.From, "whatsapp:+") || !isE164(strings.TrimPrefix(c.WhatsApp.From, "whatsapp:")) {
-			errs = append(errs, errors.New("TWILIO_WHATSAPP_FROM must be a WhatsApp E.164 sender"))
-		}
-		if strings.TrimSpace(c.Twilio.AccountSID) == "" {
-			errs = append(errs, errors.New("TWILIO_ACCOUNT_SID is required for WhatsApp notifications"))
-		}
-		if strings.TrimSpace(c.Twilio.AuthToken) == "" {
-			errs = append(errs, errors.New("TWILIO_AUTH_TOKEN is required for WhatsApp notifications"))
+		if !c.WhatsApp.DryRun {
+			if strings.TrimSpace(c.CallMeBot.APIKey) == "" {
+				errs = append(errs, errors.New("CALLMEBOT_API_KEY is required when WhatsApp is live"))
+			}
+			parsed, err := url.Parse(c.CallMeBot.BaseURL)
+			if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+				errs = append(errs, errors.New("CALLMEBOT_BASE_URL must be a valid http or https URL"))
+			}
+			if c.CallMeBot.HTTPTimeout <= 0 {
+				errs = append(errs, errors.New("CALLMEBOT_HTTP_TIMEOUT must be positive"))
+			}
 		}
 	}
 	if strings.TrimSpace(c.Notifications.CivilProtectionPhone) == "" {

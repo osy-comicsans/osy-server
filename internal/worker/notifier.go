@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -121,21 +120,6 @@ func NewDryRunSender(logger *slog.Logger) *DryRunSender {
 func (s *DryRunSender) Send(_ context.Context, to, body string) (string, error) {
 	s.logger.Info("emergency notification dry run", "to", to, "message", body)
 	return "dry-run-" + uuid.NewString(), nil
-}
-
-type WhatsAppSender struct {
-	sender NotificationSender
-}
-
-func NewWhatsAppSender(sender NotificationSender) *WhatsAppSender {
-	return &WhatsAppSender{sender: sender}
-}
-
-func (s *WhatsAppSender) Send(ctx context.Context, to, body string) (string, error) {
-	if !strings.HasPrefix(to, "whatsapp:") {
-		to = "whatsapp:" + to
-	}
-	return s.sender.Send(ctx, to, body)
 }
 
 func collectErrors(failures <-chan error) []error {
