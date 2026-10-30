@@ -130,7 +130,10 @@ Docker services use the internal hostnames `postgres` and `nats`, which are alre
 | `API_HOST_PORT` | `8080` | Host port mapped to the API |
 | `HTTP_TIMEOUT` | `15s` | HTTP server read/write timeout |
 | `SHUTDOWN_GRACE` | `20s` | Graceful API shutdown timeout |
-| `API_KEY` | required | Protects all `/api/v1` endpoints |
+| `API_KEY` | required | Protects the operational `/api/v1` endpoints |
+| `AUTH_TOKEN_SECRET` | required by the API | Signs rider access tokens; at least 32 bytes |
+| `AUTH_ACCESS_TOKEN_TTL` | `15m` | Rider access token lifetime |
+| `AUTH_REFRESH_TOKEN_TTL` | `720h` | Rider refresh token lifetime |
 | `AFRICASTALKING_USERNAME` | required | Africa's Talking username, usually `sandbox` |
 | `AFRICASTALKING_API_KEY` | required | Africa's Talking API key |
 | `AFRICASTALKING_BASE_URL` | sandbox URL | Sandbox or production API origin |
@@ -182,7 +185,7 @@ Docker services use the internal hostnames `postgres` and `nats`, which are alre
 | `OUTBOX_BATCH_SIZE` | `100` | Events claimed per cycle |
 | `OUTBOX_LEASE` | `30s` | Publisher claim lease |
 
-Configuration is validated at startup. Production refuses the example `change-me` API key.
+Configuration is validated at startup. Production refuses the example `API_KEY` and `AUTH_TOKEN_SECRET` values.
 
 ## Reliability guarantees
 
@@ -215,7 +218,7 @@ All processes handle `SIGINT` and `SIGTERM`. Workers stop fetching before waitin
 
 ## HTTP API
 
-All `/api/v1` routes require `X-API-Key` or `Authorization: Bearer <key>`.
+Operational `/api/v1` routes require `X-API-Key` or `Authorization: Bearer <key>`. Rider routes are described in [Rider authentication](#rider-authentication).
 
 | Method | Path | Description |
 | --- | --- | --- |
@@ -263,6 +266,37 @@ curl -X POST -H 'X-API-Key: change-me' \
 
 curl -X POST -H 'X-API-Key: change-me' \
   http://localhost:8080/api/v1/dlq/<dead-letter-uuid>/resolve
+```
+
+## Rider authentication
+
+The mobile app registers and signs in riders through these routes. They do not use `API_KEY`. Point the app's `EXPO_PUBLIC_API_URL` at `https://<host>/api/v1`.
+
+| Method | Path | Auth | Success |
+| --- | --- | --- | --- |
+| `POST` | `/api/v1/auth/register` | None | `201` user, access token, refresh token |
+| `POST` | `/api/v1/auth/login` | None | `200` user, access token, refresh token |
+| `POST` | `/api/v1/auth/refresh` | None | `200` new access and refresh tokens |
+| `GET` | `/api/v1/me` | `Authorization: Bearer <accessToken>` | `200` user |
+
+- Access tokens are HS256 JWTs signed with `AUTH_TOKEN_SECRET`. They last `AUTH_ACCESS_TOKEN_TTL`.
+- Refresh tokens are random and stored only as SHA-256 hashes. Each one works once: a refresh returns its replacement and the old token stops working. An unused refresh token expires after `AUTH_REFRESH_TOKEN_TTL`.
+- Passwords are hashed with bcrypt at cost 12. They need 8 to 72 characters, including a lowercase letter, an uppercase letter, and a number.
+- Emails are trimmed and lowercased. Mobile numbers must be E.164.
+- A wrong email or password returns one generic `401 invalid_credentials`. A taken email or mobile number returns `409 already_registered`, and invalid input returns `422 validation_failed`. Both name each affected field in `error.fields`.
+- Register and login allow 20 attempts per minute per client IP, then return `429 rate_limited`.
+- New users start with `onboardingStatus` set to `documents_required`. Document upload is not implemented yet.
+
+```sh
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"firstName":"Amina","lastName":"Benali","email":"amina@example.com","mobileNumber":"+213551234567","password":"Secret123"}'
+
+curl -X POST http://localhost:8080/api/v1/auth/refresh \
+  -H 'Content-Type: application/json' \
+  -d '{"refreshToken":"<refresh-token>"}'
+
+curl -H 'Authorization: Bearer <access-token>' http://localhost:8080/api/v1/me
 ```
 
 ## Structured accident reports
@@ -407,6 +441,8 @@ Core tables:
 - `dead_letters`
 - `accident_reports`
 - `emergency_notifications`
+- `users`
+- `refresh_tokens`
 
 Inspect data:
 
@@ -482,4 +518,6 @@ make swagger-check
 - Never commit `.env` or real Africa's Talking credentials.
 - Replace `API_KEY`, PostgreSQL credentials, and exposed ports before production use.
 - Put the API behind TLS at the edge.
+- Generate `AUTH_TOKEN_SECRET` with `openssl rand -base64 48` and keep it out of the repository.
+- The register and login rate limit reads the client IP from `X-Forwarded-For` or `X-Real-IP`, so the edge proxy must set those headers itself.
 - Restrict NATS and PostgreSQL network access to trusted services.
