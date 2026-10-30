@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"osyn/internal/accident"
+	"osyn/internal/callmebot"
 	"osyn/internal/config"
 	"osyn/internal/database"
 	"osyn/internal/dlq"
@@ -95,19 +96,17 @@ func run() error {
 	if cfg.WhatsApp.Enabled {
 		operatorWhatsApp = cfg.WhatsApp.To
 		if cfg.WhatsApp.DryRun {
-			whatsAppSender = worker.NewWhatsAppSender(worker.NewDryRunSender(logger))
+			whatsAppSender = worker.NewDryRunSender(logger)
 		} else {
-			whatsAppClient, err := twilio.NewClient(twilio.Config{
-				AccountSID:  cfg.Twilio.AccountSID,
-				AuthToken:   cfg.Twilio.AuthToken,
-				FromNumber:  cfg.WhatsApp.From,
-				BaseURL:     cfg.Twilio.BaseURL,
-				HTTPTimeout: cfg.Twilio.HTTPTimeout,
+			whatsAppClient, err := callmebot.NewClient(callmebot.Config{
+				APIKey:      cfg.CallMeBot.APIKey,
+				BaseURL:     cfg.CallMeBot.BaseURL,
+				HTTPTimeout: cfg.CallMeBot.HTTPTimeout,
 			})
 			if err != nil {
 				return err
 			}
-			whatsAppSender = worker.NewWhatsAppSender(whatsAppClient)
+			whatsAppSender = whatsAppClient
 		}
 	}
 	retryPolicy := retry.New(cfg.Retry.InitialDelay, cfg.Retry.MaxDelay, cfg.Retry.MaxAttempts)

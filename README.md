@@ -55,7 +55,8 @@ PostgreSQL is the source of truth. NATS is never used as primary storage.
 - Docker with Docker Compose
 - Go 1.26 or newer for local development
 - Africa's Talking sandbox or production credentials
-- Twilio account, sender, and E.164 recipients for live emergency delivery
+- CallMeBot API key for WhatsApp test confirmations
+- Authorized E.164 routing channels for live emergency delivery
 - `make` for convenience targets
 
 ## Quick start
@@ -172,9 +173,11 @@ Docker services use the internal hostnames `postgres` and `nats`, which are alre
 | `TWILIO_BASE_URL` | `https://api.twilio.com` | Twilio API origin |
 | `TWILIO_HTTP_TIMEOUT` | `15s` | Twilio HTTP timeout |
 | `WHATSAPP_NOTIFICATIONS_ENABLED` | `false` | Send operator WhatsApp confirmations |
-| `TWILIO_WHATSAPP_FROM` | sandbox sender | Twilio WhatsApp sender |
 | `OPERATOR_WHATSAPP_NUMBER` | required if enabled | Operator WhatsApp destination |
 | `WHATSAPP_DRY_RUN` | `true` | Log instead of sending WhatsApp |
+| `CALLMEBOT_API_KEY` | required for live | CallMeBot activation key |
+| `CALLMEBOT_BASE_URL` | CallMeBot endpoint | CallMeBot WhatsApp API endpoint |
+| `CALLMEBOT_HTTP_TIMEOUT` | `20s` | CallMeBot HTTP timeout |
 | `RETRY_INITIAL_DELAY` | `2s` | First retry delay |
 | `RETRY_MAX_DELAY` | `5m` | Retry delay cap |
 | `RETRY_MAX_ATTEMPTS` | `5` | Retry attempt limit |
@@ -347,18 +350,29 @@ EMERGENCY_POLICE_PHONE=+213...
 
 ### WhatsApp operator confirmation
 
-The emergency numbers can be kept as placeholders while WhatsApp is used for test confirmation. Enable the Twilio WhatsApp Sandbox and set:
+The emergency numbers can be kept as placeholders while WhatsApp is used for test confirmation. CallMeBot is configured as the WhatsApp provider:
 
 ```env
 WHATSAPP_NOTIFICATIONS_ENABLED=true
-TWILIO_WHATSAPP_FROM=whatsapp:+17372508034
 OPERATOR_WHATSAPP_NUMBER=+213794591246
 WHATSAPP_DRY_RUN=false
+CALLMEBOT_API_KEY=your-callmebot-api-key
+CALLMEBOT_BASE_URL=https://api.callmebot.com/whatsapp.php
+CALLMEBOT_HTTP_TIMEOUT=20s
 ```
 
 The worker still creates the three placeholder emergency notifications and adds a fourth notification with service `operator_whatsapp`. The WhatsApp message contains the accident reference, coordinates, damage, radius, and the status of each emergency recipient.
 
-Before Twilio can deliver a sandbox WhatsApp message, send `join twilio-trial` from the destination WhatsApp account to `+1 737 250 8034`. Twilio must confirm that the device is linked. WhatsApp business-initiated messages require an approved template outside an open conversation window.
+CallMeBot activation:
+
+1. Open the CallMeBot WhatsApp API setup page.
+2. Add the currently displayed CallMeBot phone number to your contacts.
+3. From the destination WhatsApp account, send `I allow callmebot to send me messages`.
+4. Wait for the reply containing `APIKEY`.
+5. Set `CALLMEBOT_API_KEY` and `WHATSAPP_DRY_RUN=false`.
+6. Restart the worker.
+
+CallMeBot is an unofficial personal-use service and its onboarding availability can be full. Do not use it as the only channel for real emergency notifications.
 
 The default emergency recipients remain labels unless an authorized local SMS gateway is connected. The WhatsApp summary explicitly says the emergency notifications are experimental, so it never claims a real emergency service received an alert.
 
