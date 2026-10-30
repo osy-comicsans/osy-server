@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const OperatorWhatsAppService = "operator_whatsapp"
+
 type Report struct {
 	Latitude         float64 `json:"latitude"`
 	Longitude        float64 `json:"longitude"`
@@ -121,8 +123,8 @@ func DefaultTargets(civilProtection, gendarmerie, police string) []Target {
 	}
 }
 
-func BuildAlerts(report Report, providerMessageID string, targets []Target) []Alert {
-	alerts := make([]Alert, 0, len(targets))
+func BuildAlerts(report Report, providerMessageID string, targets []Target, whatsAppTo string) []Alert {
+	alerts := make([]Alert, 0, len(targets)+1)
 	for _, target := range targets {
 		if strings.TrimSpace(target.Phone) == "" {
 			continue
@@ -133,7 +135,41 @@ func BuildAlerts(report Report, providerMessageID string, targets []Target) []Al
 			Message: arabicMessage(target, report, providerMessageID),
 		})
 	}
+	if strings.TrimSpace(whatsAppTo) != "" {
+		alerts = append(alerts, Alert{
+			Service: OperatorWhatsAppService,
+			Phone:   whatsAppTo,
+			Message: whatsAppMessage(report, providerMessageID, targets),
+		})
+	}
 	return alerts
+}
+
+func whatsAppMessage(report Report, reference string, targets []Target) string {
+	recipients := make([]string, 0, len(targets))
+	for _, target := range targets {
+		recipients = append(recipients, fmt.Sprintf("%s (%s): إشعار تجريبي", target.ArabicName, target.Phone))
+	}
+	return fmt.Sprintf(`تأكيد من منصة OSYN
+
+تمت معالجة بلاغ الحادث رقم %s.
+خط العرض: %.6f
+خط الطول: %.6f
+نسبة الأضرار التقديرية: %.1f%%
+النطاق التقريبي: %s
+
+حالة الإشعارات:
+%s
+
+ملاحظة: أرقام الطوارئ مهيأة حالياً كعناصر تجريبية ولم يتم إرسال بلاغ حقيقي إليها.
+هذه رسالة آلية من منصة OSYN.`,
+		reference,
+		report.Latitude,
+		report.Longitude,
+		report.DamagePercentage,
+		formatRadius(report.RadiusMeters),
+		strings.Join(recipients, "\n"),
+	)
 }
 
 func arabicMessage(target Target, report Report, reference string) string {

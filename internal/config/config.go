@@ -30,6 +30,7 @@ type Config struct {
 	Outbox        Outbox
 	Twilio        Twilio
 	Notifications Notifications
+	WhatsApp      WhatsApp
 }
 
 type AfricaTalking struct {
@@ -94,6 +95,13 @@ type Notifications struct {
 	CivilProtectionPhone string
 	GendarmeriePhone     string
 	PolicePhone          string
+}
+
+type WhatsApp struct {
+	Enabled bool
+	From    string
+	To      string
+	DryRun  bool
 }
 
 func Load() (*Config, error) {
@@ -188,6 +196,12 @@ func Load() (*Config, error) {
 			CivilProtectionPhone: env("EMERGENCY_CIVIL_PROTECTION_PHONE", "14"),
 			GendarmeriePhone:     env("EMERGENCY_GENDARMERIE_PHONE", "1055"),
 			PolicePhone:          env("EMERGENCY_POLICE_PHONE", "1548"),
+		},
+		WhatsApp: WhatsApp{
+			Enabled: boolValue("WHATSAPP_NOTIFICATIONS_ENABLED", false),
+			From:    env("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886"),
+			To:      env("OPERATOR_WHATSAPP_NUMBER", ""),
+			DryRun:  boolValue("WHATSAPP_DRY_RUN", true),
 		},
 	}
 
@@ -291,6 +305,22 @@ func (c *Config) ValidateProvider() error {
 
 func (c *Config) ValidateNotifications() error {
 	var errs []error
+	if c.WhatsApp.Enabled {
+		if strings.TrimSpace(c.WhatsApp.To) == "" {
+			errs = append(errs, errors.New("OPERATOR_WHATSAPP_NUMBER is required when WhatsApp notifications are enabled"))
+		} else if !isE164(c.WhatsApp.To) {
+			errs = append(errs, errors.New("OPERATOR_WHATSAPP_NUMBER must be E.164"))
+		}
+		if !strings.HasPrefix(c.WhatsApp.From, "whatsapp:+") || !isE164(strings.TrimPrefix(c.WhatsApp.From, "whatsapp:")) {
+			errs = append(errs, errors.New("TWILIO_WHATSAPP_FROM must be a WhatsApp E.164 sender"))
+		}
+		if strings.TrimSpace(c.Twilio.AccountSID) == "" {
+			errs = append(errs, errors.New("TWILIO_ACCOUNT_SID is required for WhatsApp notifications"))
+		}
+		if strings.TrimSpace(c.Twilio.AuthToken) == "" {
+			errs = append(errs, errors.New("TWILIO_AUTH_TOKEN is required for WhatsApp notifications"))
+		}
+	}
 	if strings.TrimSpace(c.Notifications.CivilProtectionPhone) == "" {
 		errs = append(errs, errors.New("EMERGENCY_CIVIL_PROTECTION_PHONE is required"))
 	}

@@ -171,6 +171,10 @@ Docker services use the internal hostnames `postgres` and `nats`, which are alre
 | `TWILIO_MESSAGING_SERVICE_SID` | optional | Alternative Twilio sender service |
 | `TWILIO_BASE_URL` | `https://api.twilio.com` | Twilio API origin |
 | `TWILIO_HTTP_TIMEOUT` | `15s` | Twilio HTTP timeout |
+| `WHATSAPP_NOTIFICATIONS_ENABLED` | `false` | Send operator WhatsApp confirmations |
+| `TWILIO_WHATSAPP_FROM` | sandbox sender | Twilio WhatsApp sender |
+| `OPERATOR_WHATSAPP_NUMBER` | required if enabled | Operator WhatsApp destination |
+| `WHATSAPP_DRY_RUN` | `true` | Log instead of sending WhatsApp |
 | `RETRY_INITIAL_DELAY` | `2s` | First retry delay |
 | `RETRY_MAX_DELAY` | `5m` | Retry delay cap |
 | `RETRY_MAX_ATTEMPTS` | `5` | Retry attempt limit |
@@ -340,6 +344,23 @@ EMERGENCY_CIVIL_PROTECTION_PHONE=+213...
 EMERGENCY_GENDARMERIE_PHONE=+213...
 EMERGENCY_POLICE_PHONE=+213...
 ```
+
+### WhatsApp operator confirmation
+
+The emergency numbers can be kept as placeholders while WhatsApp is used for test confirmation. Enable the Twilio WhatsApp Sandbox and set:
+
+```env
+WHATSAPP_NOTIFICATIONS_ENABLED=true
+TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+OPERATOR_WHATSAPP_NUMBER=+213794591246
+WHATSAPP_DRY_RUN=false
+```
+
+The worker still creates the three placeholder emergency notifications and adds a fourth notification with service `operator_whatsapp`. The WhatsApp message contains the accident reference, coordinates, damage, radius, and the status of each emergency recipient.
+
+Before Twilio can deliver a sandbox WhatsApp message, open Twilio Console, go to **Messaging → Try it out → Send a WhatsApp message**, and send the displayed join code from the destination WhatsApp account to the sandbox number. WhatsApp business-initiated messages require an approved template outside an open conversation window.
+
+The default emergency recipients remain labels unless an authorized local SMS gateway is connected. The WhatsApp summary explicitly says the emergency notifications are experimental, so it never claims a real emergency service received an alert.
 
 ### Test the accident pipeline
 

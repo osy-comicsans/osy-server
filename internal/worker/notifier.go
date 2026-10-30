@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
 
+	"osyn/internal/accident"
 	"osyn/internal/database"
+	"osyn/internal/retry"
 )
 
 type NotificationSender interface {
@@ -22,17 +25,26 @@ type NotificationStore interface {
 }
 
 type Notifier struct {
-	store   NotificationStore
-	sender  NotificationSender
-	workers int
-	logger  *slog.Logger
+	store          NotificationStore
+	sender         NotificationSender
+	whatsAppSender NotificationSender
+	workers        int
+	retryPolicy    retry.Policy
+	logger         *slog.Logger
 }
 
-func NewNotifier(store NotificationStore, sender NotificationSender, workers int, logger *slog.Logger) *Notifier {
+func NewNotifier(store NotificationStore, sender, whatsAppSender NotificationSender, workers int, retryPolicy retry.Policy, logger *slog.Logger) *Notifier {
 	if workers < 1 {
 		workers = 1
 	}
-	return &Notifier{store: store, sender: sender, workers: workers, logger: logger}
+	return &Notifier{
+		store:          store,
+		sender:         sender,
+		whatsAppSender: whatsAppSender,
+		workers:        workers,
+		retryPolicy:    retryPolicy,
+		logger:         logger,
+	}
 }
 
 func (n *Notifier) Notify(ctx context.Context, notifications []database.EmergencyNotification) error {
@@ -72,7 +84,19 @@ func (n *Notifier) Notify(ctx context.Context, notifications []database.Emergenc
 }
 
 func (n *Notifier) deliver(ctx context.Context, notification database.EmergencyNotification) error {
-	sid, err := n.sender.Send(ctx, notification.TargetPhone, notification.Message)
+	sender := n.sender
+	if notification.Service == accident.OperatorWhatsAppService {
+		sender = n.whatsAppSender
+	}
+	if sender == nil {
+		return fmt.Errorf("no sender configured for notification service %s", notification.Service)
+	}
+	var sid string
+	err := n.retryPolicy.Do(ctx, func(ctx context.Context) error {
+		var sendErr error
+		sid, sendErr = sender.Send(ctx, notification.TargetPhone, notification.Message)
+		return sendErr
+	})
 	if err != nil {
 		if markErr := n.store.MarkEmergencyNotificationFailed(ctx, notification.ID, err); markErr != nil {
 			return fmt.Errorf("send alert to %s: %w; record failure: %v", notification.Service, err, markErr)
@@ -97,6 +121,21 @@ func NewDryRunSender(logger *slog.Logger) *DryRunSender {
 func (s *DryRunSender) Send(_ context.Context, to, body string) (string, error) {
 	s.logger.Info("emergency notification dry run", "to", to, "message", body)
 	return "dry-run-" + uuid.NewString(), nil
+}
+
+type WhatsAppSender struct {
+	sender NotificationSender
+}
+
+func NewWhatsAppSender(sender NotificationSender) *WhatsAppSender {
+	return &WhatsAppSender{sender: sender}
+}
+
+func (s *WhatsAppSender) Send(ctx context.Context, to, body string) (string, error) {
+	if !strings.HasPrefix(to, "whatsapp:") {
+		to = "whatsapp:" + to
+	}
+	return s.sender.Send(ctx, to, body)
 }
 
 func collectErrors(failures <-chan error) []error {

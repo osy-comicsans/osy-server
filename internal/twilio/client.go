@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"osyn/internal/retry"
 )
 
 type Config struct {
@@ -102,7 +104,7 @@ func (c *Client) Send(ctx context.Context, to, body string) (string, error) {
 	var payload response
 	if err := json.Unmarshal(data, &payload); err != nil {
 		if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
-			return "", &HTTPError{StatusCode: httpResponse.StatusCode, Message: truncate(string(data), 512)}
+			return "", classifyHTTPError(httpResponse.StatusCode, truncate(string(data), 512))
 		}
 		return "", fmt.Errorf("decode twilio response: %w", err)
 	}
@@ -111,12 +113,20 @@ func (c *Client) Send(ctx context.Context, to, body string) (string, error) {
 		if message == "" {
 			message = truncate(string(data), 512)
 		}
-		return "", &HTTPError{StatusCode: httpResponse.StatusCode, Message: message}
+		return "", classifyHTTPError(httpResponse.StatusCode, message)
 	}
 	if payload.SID == "" {
 		return "", fmt.Errorf("twilio response does not contain a message sid")
 	}
 	return payload.SID, nil
+}
+
+func classifyHTTPError(statusCode int, message string) error {
+	httpErr := &HTTPError{StatusCode: statusCode, Message: message}
+	if statusCode == http.StatusTooManyRequests || statusCode == http.StatusRequestTimeout || statusCode >= http.StatusInternalServerError {
+		return httpErr
+	}
+	return retry.Permanent(httpErr)
 }
 
 func truncate(value string, limit int) string {

@@ -90,13 +90,33 @@ func run() error {
 			return err
 		}
 	}
+	var whatsAppSender worker.NotificationSender
+	operatorWhatsApp := ""
+	if cfg.WhatsApp.Enabled {
+		operatorWhatsApp = cfg.WhatsApp.To
+		if cfg.WhatsApp.DryRun {
+			whatsAppSender = worker.NewWhatsAppSender(worker.NewDryRunSender(logger))
+		} else {
+			whatsAppClient, err := twilio.NewClient(twilio.Config{
+				AccountSID:  cfg.Twilio.AccountSID,
+				AuthToken:   cfg.Twilio.AuthToken,
+				FromNumber:  cfg.WhatsApp.From,
+				BaseURL:     cfg.Twilio.BaseURL,
+				HTTPTimeout: cfg.Twilio.HTTPTimeout,
+			})
+			if err != nil {
+				return err
+			}
+			whatsAppSender = worker.NewWhatsAppSender(whatsAppClient)
+		}
+	}
 	retryPolicy := retry.New(cfg.Retry.InitialDelay, cfg.Retry.MaxDelay, cfg.Retry.MaxAttempts)
 	router := dlq.NewRouter(db, natsClient, cfg.NATS.DLQSubject)
-	notifier := worker.NewNotifier(db, sender, cfg.Notifications.Workers, logger)
+	notifier := worker.NewNotifier(db, sender, whatsAppSender, cfg.Notifications.Workers, retryPolicy, logger)
 	targets := accident.DefaultTargets(cfg.Notifications.CivilProtectionPhone, cfg.Notifications.GendarmeriePhone, cfg.Notifications.PolicePhone)
-	handler := worker.NewHandler(db, router, notifier, targets, cfg.Notifications.MaxRadiusMeters, cfg.Worker.MaxDeliveries, retryPolicy, logger)
+	handler := worker.NewHandler(db, router, notifier, targets, operatorWhatsApp, cfg.Notifications.MaxRadiusMeters, cfg.Worker.MaxDeliveries, retryPolicy, logger)
 	service := worker.NewService(consumer, handler, cfg.Worker.Concurrency, cfg.Worker.FetchWait, cfg.Worker.ProcessTimeout, logger)
-	logger.Info("worker started", "concurrency", cfg.Worker.Concurrency, "durable", cfg.Worker.ConsumerDurable, "notification_workers", cfg.Notifications.Workers, "twilio_dry_run", cfg.Twilio.DryRun)
+	logger.Info("worker started", "concurrency", cfg.Worker.Concurrency, "durable", cfg.Worker.ConsumerDurable, "notification_workers", cfg.Notifications.Workers, "twilio_dry_run", cfg.Twilio.DryRun, "whatsapp_enabled", cfg.WhatsApp.Enabled)
 	if err := service.Run(ctx); err != nil {
 		return err
 	}

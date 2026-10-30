@@ -26,17 +26,18 @@ type NotificationDispatcher interface {
 }
 
 type Handler struct {
-	store           Store
-	dlq             DeadLetterRouter
-	notifier        NotificationDispatcher
-	targets         []accident.Target
-	maxRadiusMeters int
-	maxDeliveries   int
-	retryPolicy     retry.Policy
-	logger          *slog.Logger
+	store            Store
+	dlq              DeadLetterRouter
+	notifier         NotificationDispatcher
+	targets          []accident.Target
+	operatorWhatsApp string
+	maxRadiusMeters  int
+	maxDeliveries    int
+	retryPolicy      retry.Policy
+	logger           *slog.Logger
 }
 
-func NewHandler(store Store, dlq DeadLetterRouter, notifier NotificationDispatcher, targets []accident.Target, maxRadiusMeters, maxDeliveries int, retryPolicy retry.Policy, logger *slog.Logger) *Handler {
+func NewHandler(store Store, dlq DeadLetterRouter, notifier NotificationDispatcher, targets []accident.Target, operatorWhatsApp string, maxRadiusMeters, maxDeliveries int, retryPolicy retry.Policy, logger *slog.Logger) *Handler {
 	if maxDeliveries < 1 {
 		maxDeliveries = 1
 	}
@@ -44,14 +45,15 @@ func NewHandler(store Store, dlq DeadLetterRouter, notifier NotificationDispatch
 		maxRadiusMeters = 100000
 	}
 	return &Handler{
-		store:           store,
-		dlq:             dlq,
-		notifier:        notifier,
-		targets:         targets,
-		maxRadiusMeters: maxRadiusMeters,
-		maxDeliveries:   maxDeliveries,
-		retryPolicy:     retryPolicy,
-		logger:          logger,
+		store:            store,
+		dlq:              dlq,
+		notifier:         notifier,
+		targets:          targets,
+		operatorWhatsApp: operatorWhatsApp,
+		maxRadiusMeters:  maxRadiusMeters,
+		maxDeliveries:    maxDeliveries,
+		retryPolicy:      retryPolicy,
+		logger:           logger,
 	}
 }
 
@@ -77,7 +79,7 @@ func (h *Handler) Handle(ctx context.Context, delivery messaging.Delivery) {
 		h.handleFailure(ctx, delivery, eventID, event, payload, retry.Permanent(fmt.Errorf("invalid accident report: %w", err)), attempts)
 		return
 	}
-	alerts := accident.BuildAlerts(report, event.ProviderMessageID, h.targets)
+	alerts := accident.BuildAlerts(report, event.ProviderMessageID, h.targets, h.operatorWhatsApp)
 	notifications, err := h.store.ProcessAccidentEvent(ctx, event, report, alerts)
 	if err != nil {
 		h.handleFailure(ctx, delivery, eventID, event, payload, err, attempts)
