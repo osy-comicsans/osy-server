@@ -351,14 +351,14 @@ The emergency numbers can be kept as placeholders while WhatsApp is used for tes
 
 ```env
 WHATSAPP_NOTIFICATIONS_ENABLED=true
-TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+TWILIO_WHATSAPP_FROM=whatsapp:+17372508034
 OPERATOR_WHATSAPP_NUMBER=+213794591246
 WHATSAPP_DRY_RUN=false
 ```
 
 The worker still creates the three placeholder emergency notifications and adds a fourth notification with service `operator_whatsapp`. The WhatsApp message contains the accident reference, coordinates, damage, radius, and the status of each emergency recipient.
 
-Before Twilio can deliver a sandbox WhatsApp message, open Twilio Console, go to **Messaging → Try it out → Send a WhatsApp message**, and send the displayed join code from the destination WhatsApp account to the sandbox number. WhatsApp business-initiated messages require an approved template outside an open conversation window.
+Before Twilio can deliver a sandbox WhatsApp message, send `join twilio-trial` from the destination WhatsApp account to `+1 737 250 8034`. Twilio must confirm that the device is linked. WhatsApp business-initiated messages require an approved template outside an open conversation window.
 
 The default emergency recipients remain labels unless an authorized local SMS gateway is connected. The WhatsApp summary explicitly says the emergency notifications are experimental, so it never claims a real emergency service received an alert.
 

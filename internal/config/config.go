@@ -199,7 +199,7 @@ func Load() (*Config, error) {
 		},
 		WhatsApp: WhatsApp{
 			Enabled: boolValue("WHATSAPP_NOTIFICATIONS_ENABLED", false),
-			From:    env("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886"),
+			From:    env("TWILIO_WHATSAPP_FROM", "whatsapp:+17372508034"),
 			To:      env("OPERATOR_WHATSAPP_NUMBER", ""),
 			DryRun:  boolValue("WHATSAPP_DRY_RUN", true),
 		},
