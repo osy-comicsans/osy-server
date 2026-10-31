@@ -11,9 +11,11 @@ import (
 	"syscall"
 	"time"
 
+	"osyn/internal/auth"
 	"osyn/internal/config"
 	"osyn/internal/database"
 	"osyn/internal/dlq"
+	"osyn/internal/documents"
 	apihttp "osyn/internal/http"
 	"osyn/internal/http/handlers"
 	"osyn/internal/messaging"
@@ -30,6 +32,12 @@ func main() {
 func run() error {
 	cfg, err := config.Load()
 	if err != nil {
+		return err
+	}
+	if err := cfg.ValidateAuth(); err != nil {
+		return err
+	}
+	if err := cfg.ValidateDocuments(); err != nil {
 		return err
 	}
 	logger := observability.NewLogger(cfg.LogLevel, cfg.AppName, "api")
@@ -56,9 +64,26 @@ func run() error {
 	metrics := observability.NewMetrics()
 	dlqService := dlq.NewService(db, cfg.NATS.SMSSubject)
 	handler := handlers.New(db, dlqService, db, natsClient, metrics, logger)
+	authService := auth.NewService(db, auth.Config{
+		Secret:     []byte(cfg.Auth.TokenSecret),
+		AccessTTL:  cfg.Auth.AccessTokenTTL,
+		RefreshTTL: cfg.Auth.RefreshTokenTTL,
+	})
+	documentService, err := documents.NewService(db, cfg.Documents.EncryptionKey)
+	if err != nil {
+		return err
+	}
 	server := &http.Server{
-		Addr:              ":" + cfg.HTTPPort,
-		Handler:           apihttp.NewRouter(apihttp.Dependencies{Handlers: handler, APIKey: cfg.APIKey, Logger: logger, Metrics: metrics}),
+		Addr: ":" + cfg.HTTPPort,
+		Handler: apihttp.NewRouter(apihttp.Dependencies{
+			Handlers:  handler,
+			Auth:      handlers.NewAuth(authService, logger),
+			Documents: handlers.NewDocuments(documentService, logger),
+			Users:     authService,
+			APIKey:    cfg.APIKey,
+			Logger:    logger,
+			Metrics:   metrics,
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       cfg.HTTPTimeout,
 		WriteTimeout:      cfg.HTTPTimeout,
