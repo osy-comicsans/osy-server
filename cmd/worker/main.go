@@ -9,13 +9,13 @@ import (
 	"syscall"
 
 	"osyn/internal/accident"
-	"osyn/internal/callmebot"
 	"osyn/internal/config"
 	"osyn/internal/database"
 	"osyn/internal/dlq"
 	"osyn/internal/messaging"
 	"osyn/internal/observability"
 	"osyn/internal/retry"
+	"osyn/internal/telegram"
 	"osyn/internal/twilio"
 	"osyn/internal/worker"
 )
@@ -91,31 +91,31 @@ func run() error {
 			return err
 		}
 	}
-	var whatsAppSender worker.NotificationSender
-	operatorWhatsApp := ""
-	if cfg.WhatsApp.Enabled {
-		operatorWhatsApp = cfg.WhatsApp.To
-		if cfg.WhatsApp.DryRun {
-			whatsAppSender = worker.NewDryRunSender(logger)
+	var operatorSender worker.NotificationSender
+	operatorChatID := ""
+	if cfg.Telegram.Enabled {
+		operatorChatID = cfg.Telegram.ChatID
+		if cfg.Telegram.DryRun {
+			operatorSender = worker.NewDryRunSender(logger)
 		} else {
-			whatsAppClient, err := callmebot.NewClient(callmebot.Config{
-				APIKey:      cfg.CallMeBot.APIKey,
-				BaseURL:     cfg.CallMeBot.BaseURL,
-				HTTPTimeout: cfg.CallMeBot.HTTPTimeout,
+			telegramClient, err := telegram.NewClient(telegram.Config{
+				BotToken:    cfg.Telegram.BotToken,
+				BaseURL:     cfg.Telegram.BaseURL,
+				HTTPTimeout: cfg.Telegram.HTTPTimeout,
 			})
 			if err != nil {
 				return err
 			}
-			whatsAppSender = whatsAppClient
+			operatorSender = telegramClient
 		}
 	}
 	retryPolicy := retry.New(cfg.Retry.InitialDelay, cfg.Retry.MaxDelay, cfg.Retry.MaxAttempts)
 	router := dlq.NewRouter(db, natsClient, cfg.NATS.DLQSubject)
-	notifier := worker.NewNotifier(db, sender, whatsAppSender, cfg.Notifications.Workers, retryPolicy, logger)
+	notifier := worker.NewNotifier(db, sender, operatorSender, cfg.Notifications.Workers, retryPolicy, logger)
 	targets := accident.DefaultTargets(cfg.Notifications.CivilProtectionPhone, cfg.Notifications.GendarmeriePhone, cfg.Notifications.PolicePhone)
-	handler := worker.NewHandler(db, router, notifier, targets, operatorWhatsApp, cfg.Notifications.MaxRadiusMeters, cfg.Worker.MaxDeliveries, retryPolicy, logger)
+	handler := worker.NewHandler(db, router, notifier, targets, operatorChatID, cfg.Notifications.MaxRadiusMeters, cfg.Worker.MaxDeliveries, retryPolicy, logger)
 	service := worker.NewService(consumer, handler, cfg.Worker.Concurrency, cfg.Worker.FetchWait, cfg.Worker.ProcessTimeout, logger)
-	logger.Info("worker started", "concurrency", cfg.Worker.Concurrency, "durable", cfg.Worker.ConsumerDurable, "notification_workers", cfg.Notifications.Workers, "twilio_dry_run", cfg.Twilio.DryRun, "whatsapp_enabled", cfg.WhatsApp.Enabled)
+	logger.Info("worker started", "concurrency", cfg.Worker.Concurrency, "durable", cfg.Worker.ConsumerDurable, "notification_workers", cfg.Notifications.Workers, "twilio_dry_run", cfg.Twilio.DryRun, "telegram_enabled", cfg.Telegram.Enabled)
 	if err := service.Run(ctx); err != nil {
 		return err
 	}
