@@ -429,6 +429,39 @@ select id, status, attempts, subject from outbox_events order by created_at desc
 select id, event_id, status, replay_count, error from dead_letters order by created_at desc;
 ```
 
+## Demo launcher
+
+The fish launcher builds and starts the full stack, waits for readiness, writes timestamped logs, and prints a demo summary:
+
+```sh
+./scripts/launch.fish
+```
+
+Equivalent Make target:
+
+```sh
+make demo
+```
+
+Demo commands:
+
+```sh
+./scripts/launch.fish status
+./scripts/launch.fish health
+./scripts/launch.fish logs
+./scripts/launch.fish save
+./scripts/launch.fish restart
+./scripts/launch.fish stop
+```
+
+Every launch writes a timestamped log snapshot under:
+
+```text
+logs/osyn-YYYYmmdd-HHMMSS.log
+```
+
+The demo summary includes the API URL, Swagger URL, readiness response, log path, Telegram state, Twilio dry-run state, and Docker service status.
+
 ## Local development
 
 Start only the infrastructure:

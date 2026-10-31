@@ -1,7 +1,7 @@
 SHELL := /bin/sh
 COMPOSE := docker compose
 
-.PHONY: help env build fmt fmt-check vet check docker-build up down restart logs ps seed psql swagger-check clean
+.PHONY: help env build fmt fmt-check vet check docker-build up down restart logs ps seed psql swagger-check clean launch demo
 
 help:
 	@printf '%s\n' \
@@ -13,6 +13,8 @@ help:
 		'make check          Run fmt-check, vet, swagger-check, and build' \
 		'make docker-build   Build all service images' \
 		'make up             Start the complete stack' \
+		'make launch         Start, wait for readiness, save logs, and show demo summary' \
+		'make demo           Alias for make launch' \
 		'make down           Stop the stack' \
 		'make restart        Rebuild and restart the stack' \
 		'make logs           Follow service logs' \
@@ -47,6 +49,11 @@ docker-build:
 
 up: env
 	$(COMPOSE) up -d --build
+
+launch: env
+	./scripts/launch.fish launch
+
+demo: launch
 
 down:
 	$(COMPOSE) down
