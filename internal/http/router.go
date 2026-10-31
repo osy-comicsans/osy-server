@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/httprate"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 
 	_ "osyn/docs"
@@ -15,8 +16,13 @@ import (
 	"osyn/internal/observability"
 )
 
+// Register and login run bcrypt, so each IP gets a bounded number of attempts.
+const credentialAttemptsPerMinute = 20
+
 type Dependencies struct {
 	Handlers *handlers.Handler
+	Auth     *handlers.Auth
+	Users    middleware.AccessTokenVerifier
 	APIKey   string
 	Logger   *slog.Logger
 	Metrics  *observability.Metrics
@@ -47,17 +53,40 @@ func NewRouter(deps Dependencies) http.Handler {
 	router.Get("/swagger/*", httpSwagger.Handler())
 
 	router.Route("/api/v1", func(api chi.Router) {
-		api.Use(middleware.APIKey(deps.APIKey))
-		api.Get("/messages", deps.Handlers.ListMessages)
-		api.Get("/messages/{id}", deps.Handlers.GetMessage)
-		api.Get("/stats", deps.Handlers.Stats)
-		api.Get("/outbox", deps.Handlers.ListOutbox)
-		api.Get("/outbox/{id}", deps.Handlers.GetOutbox)
-		api.Get("/dlq", deps.Handlers.ListDLQ)
-		api.Get("/dlq/{id}", deps.Handlers.GetDLQ)
-		api.Post("/dlq/{id}/replay", deps.Handlers.ReplayDLQ)
-		api.Post("/dlq/{id}/resolve", deps.Handlers.ResolveDLQ)
-		api.Get("/metrics", deps.Handlers.Metrics)
+		api.Group(func(ops chi.Router) {
+			ops.Use(middleware.APIKey(deps.APIKey))
+			ops.Get("/messages", deps.Handlers.ListMessages)
+			ops.Get("/messages/{id}", deps.Handlers.GetMessage)
+			ops.Get("/stats", deps.Handlers.Stats)
+			ops.Get("/outbox", deps.Handlers.ListOutbox)
+			ops.Get("/outbox/{id}", deps.Handlers.GetOutbox)
+			ops.Get("/dlq", deps.Handlers.ListDLQ)
+			ops.Get("/dlq/{id}", deps.Handlers.GetDLQ)
+			ops.Post("/dlq/{id}/replay", deps.Handlers.ReplayDLQ)
+			ops.Post("/dlq/{id}/resolve", deps.Handlers.ResolveDLQ)
+			ops.Get("/metrics", deps.Handlers.Metrics)
+		})
+
+		api.Route("/auth", func(auth chi.Router) {
+			auth.Group(func(credentials chi.Router) {
+				credentials.Use(httprate.Limit(credentialAttemptsPerMinute, time.Minute,
+					httprate.WithKeyFuncs(httprate.KeyByIP),
+					httprate.WithLimitHandler(func(w http.ResponseWriter, _ *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusTooManyRequests)
+						_, _ = w.Write([]byte(`{"error":{"code":"rate_limited","message":"too many attempts, try again shortly"}}`))
+					}),
+				))
+				credentials.Post("/register", deps.Auth.Register)
+				credentials.Post("/login", deps.Auth.Login)
+			})
+			auth.Post("/refresh", deps.Auth.Refresh)
+		})
+
+		api.Group(func(user chi.Router) {
+			user.Use(middleware.RequireUser(deps.Users))
+			user.Get("/me", deps.Auth.Me)
+		})
 	})
 	return router
 }

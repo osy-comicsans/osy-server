@@ -6,7 +6,7 @@ const docTemplate = `{
   "swagger": "2.0",
   "info": {
     "title": "OSYN API",
-    "description": "OSYN ingests Africa's Talking SMS messages through a transactional inbox/outbox pipeline and exposes operational APIs. Operational endpoints require an API key supplied through X-API-Key or Authorization: Bearer <key>.",
+    "description": "OSYN ingests Africa's Talking SMS messages through a transactional inbox/outbox pipeline and exposes operational APIs. Operational endpoints require an API key supplied through X-API-Key or Authorization: Bearer <key>. Rider endpoints under /api/v1/auth and /api/v1/me use rider tokens instead.",
     "version": "1.0.0"
   },
   "host": "localhost:8080",
@@ -26,6 +26,12 @@ const docTemplate = `{
       "name": "Authorization",
       "in": "header",
       "description": "Bearer token containing the configured API key."
+    },
+    "UserAuth": {
+      "type": "apiKey",
+      "name": "Authorization",
+      "in": "header",
+      "description": "Bearer token containing a rider access token from register, login, or refresh."
     }
   },
   "paths": {
@@ -228,6 +234,65 @@ const docTemplate = `{
           "500": {"description": "Internal error", "schema": {"$ref": "#/definitions/ErrorEnvelope"}}
         }
       }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "tags": ["Rider Authentication"],
+        "summary": "Register a rider account",
+        "operationId": "register",
+        "parameters": [{"name": "body", "in": "body", "required": true, "schema": {"$ref": "#/definitions/RegisterRequest"}}],
+        "responses": {
+          "201": {"description": "Created user and tokens", "schema": {"$ref": "#/definitions/AuthResponse"}},
+          "400": {"description": "Body is not a JSON object", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "409": {"description": "Email or mobile number already registered, named in error.fields", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "422": {"description": "Invalid fields, named in error.fields", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "429": {"description": "Too many attempts from this IP", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "500": {"description": "Internal error", "schema": {"$ref": "#/definitions/ErrorEnvelope"}}
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": ["Rider Authentication"],
+        "summary": "Sign in with email and password",
+        "operationId": "login",
+        "parameters": [{"name": "body", "in": "body", "required": true, "schema": {"$ref": "#/definitions/LoginRequest"}}],
+        "responses": {
+          "200": {"description": "User and tokens", "schema": {"$ref": "#/definitions/AuthResponse"}},
+          "400": {"description": "Body is not a JSON object", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "401": {"description": "Wrong email or password", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "429": {"description": "Too many attempts from this IP", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "500": {"description": "Internal error", "schema": {"$ref": "#/definitions/ErrorEnvelope"}}
+        }
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "tags": ["Rider Authentication"],
+        "summary": "Exchange a refresh token for a new token pair",
+        "description": "Each refresh token works once. The response carries its replacement.",
+        "operationId": "refresh",
+        "parameters": [{"name": "body", "in": "body", "required": true, "schema": {"$ref": "#/definitions/RefreshRequest"}}],
+        "responses": {
+          "200": {"description": "New access and refresh tokens", "schema": {"$ref": "#/definitions/TokenPair"}},
+          "400": {"description": "Body is not a JSON object", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "401": {"description": "Refresh token is unknown, already used, or expired", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "500": {"description": "Internal error", "schema": {"$ref": "#/definitions/ErrorEnvelope"}}
+        }
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "tags": ["Rider Authentication"],
+        "summary": "Get the signed-in rider",
+        "operationId": "me",
+        "security": [{"UserAuth": []}],
+        "responses": {
+          "200": {"description": "Signed-in user", "schema": {"$ref": "#/definitions/User"}},
+          "401": {"description": "Missing, invalid, or expired access token", "schema": {"$ref": "#/definitions/ErrorEnvelope"}},
+          "500": {"description": "Internal error", "schema": {"$ref": "#/definitions/ErrorEnvelope"}}
+        }
+      }
     }
   },
   "definitions": {
@@ -254,7 +319,8 @@ const docTemplate = `{
       "type": "object",
       "properties": {
         "code": {"type": "string", "example": "not_found"},
-        "message": {"type": "string", "example": "message not found"}
+        "message": {"type": "string", "example": "message not found"},
+        "fields": {"type": "object", "additionalProperties": {"type": "string"}, "example": {"email": "This email is already registered"}}
       }
     },
     "Message": {
@@ -387,6 +453,58 @@ const docTemplate = `{
             "resolved": {"type": "integer", "format": "int64"}
           }
         }
+      }
+    },
+    "RegisterRequest": {
+      "type": "object",
+      "required": ["firstName", "lastName", "email", "mobileNumber", "password"],
+      "properties": {
+        "firstName": {"type": "string", "minLength": 2, "maxLength": 50, "example": "Amina"},
+        "lastName": {"type": "string", "minLength": 2, "maxLength": 50, "example": "Benali"},
+        "email": {"type": "string", "format": "email", "example": "amina@example.com"},
+        "mobileNumber": {"type": "string", "description": "E.164", "example": "+213551234567"},
+        "password": {"type": "string", "format": "password", "minLength": 8, "maxLength": 72, "description": "Includes a lowercase letter, an uppercase letter, and a number."}
+      }
+    },
+    "LoginRequest": {
+      "type": "object",
+      "required": ["email", "password"],
+      "properties": {
+        "email": {"type": "string", "format": "email", "example": "amina@example.com"},
+        "password": {"type": "string", "format": "password"}
+      }
+    },
+    "RefreshRequest": {
+      "type": "object",
+      "required": ["refreshToken"],
+      "properties": {
+        "refreshToken": {"type": "string"}
+      }
+    },
+    "User": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "string", "format": "uuid"},
+        "firstName": {"type": "string", "example": "Amina"},
+        "lastName": {"type": "string", "example": "Benali"},
+        "email": {"type": "string", "example": "amina@example.com"},
+        "mobileNumber": {"type": "string", "example": "+213551234567"},
+        "onboardingStatus": {"type": "string", "enum": ["documents_required", "complete"]}
+      }
+    },
+    "AuthResponse": {
+      "type": "object",
+      "properties": {
+        "user": {"$ref": "#/definitions/User"},
+        "accessToken": {"type": "string"},
+        "refreshToken": {"type": "string"}
+      }
+    },
+    "TokenPair": {
+      "type": "object",
+      "properties": {
+        "accessToken": {"type": "string"},
+        "refreshToken": {"type": "string"}
       }
     }
   }

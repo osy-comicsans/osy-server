@@ -55,6 +55,38 @@ type DeadLetter struct {
 	ResolvedAt        *time.Time      `json:"resolved_at,omitempty"`
 }
 
+type User struct {
+	ID               string `json:"id"`
+	FirstName        string `json:"firstName"`
+	LastName         string `json:"lastName"`
+	Email            string `json:"email"`
+	MobileNumber     string `json:"mobileNumber"`
+	OnboardingStatus string `json:"onboardingStatus"`
+}
+
+type NewUser struct {
+	ID           string
+	FirstName    string
+	LastName     string
+	Email        string
+	MobileNumber string
+	PasswordHash string
+}
+
+type RefreshToken struct {
+	Hash      []byte
+	ExpiresAt time.Time
+}
+
+type UserConflict struct {
+	Email        bool
+	MobileNumber bool
+}
+
+func (e *UserConflict) Error() string {
+	return "user already exists"
+}
+
 type IncomingMessage struct {
 	ProviderMessageID string
 	Sender            string

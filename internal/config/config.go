@@ -31,6 +31,13 @@ type Config struct {
 	Twilio        Twilio
 	Notifications Notifications
 	Telegram      Telegram
+	Auth          Auth
+}
+
+type Auth struct {
+	TokenSecret     string
+	AccessTokenTTL  time.Duration
+	RefreshTokenTTL time.Duration
 }
 
 type AfricaTalking struct {
@@ -199,6 +206,11 @@ func Load() (*Config, error) {
 			GendarmeriePhone:     env("EMERGENCY_GENDARMERIE_PHONE", "1055"),
 			PolicePhone:          env("EMERGENCY_POLICE_PHONE", "1548"),
 		},
+		Auth: Auth{
+			TokenSecret:     env("AUTH_TOKEN_SECRET", ""),
+			AccessTokenTTL:  duration("AUTH_ACCESS_TOKEN_TTL", 15*time.Minute),
+			RefreshTokenTTL: duration("AUTH_REFRESH_TOKEN_TTL", 30*24*time.Hour),
+		},
 		Telegram: Telegram{
 			Enabled:     boolValue("TELEGRAM_NOTIFICATIONS_ENABLED", false),
 			ChatID:      env("TELEGRAM_CHAT_ID", ""),
@@ -291,6 +303,9 @@ func Load() (*Config, error) {
 	if cfg.Notifications.MaxRadiusMeters < 1 {
 		errs = append(errs, errors.New("ACCIDENT_MAX_RADIUS_METERS must be positive"))
 	}
+	if cfg.Auth.AccessTokenTTL <= 0 || cfg.Auth.RefreshTokenTTL <= 0 {
+		errs = append(errs, errors.New("AUTH_ACCESS_TOKEN_TTL and AUTH_REFRESH_TOKEN_TTL must be positive"))
+	}
 	cfg.validateProvider(&errs)
 	cfg.validateLogLevel(&errs)
 	cfg.validateURLs(&errs)
@@ -304,6 +319,17 @@ func Load() (*Config, error) {
 func (c *Config) ValidateProvider() error {
 	var errs []error
 	c.validateProvider(&errs)
+	return errors.Join(errs...)
+}
+
+func (c *Config) ValidateAuth() error {
+	var errs []error
+	if len(c.Auth.TokenSecret) < 32 {
+		errs = append(errs, errors.New("AUTH_TOKEN_SECRET must be at least 32 bytes"))
+	}
+	if c.AppEnv == "production" && c.Auth.TokenSecret == "change-me-to-a-random-secret-of-32-bytes-or-more" {
+		errs = append(errs, errors.New("AUTH_TOKEN_SECRET must not use the example value in production"))
+	}
 	return errors.Join(errs...)
 }
 
