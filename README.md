@@ -55,7 +55,7 @@ PostgreSQL is the source of truth. NATS is never used as primary storage.
 - Docker with Docker Compose
 - Go 1.26 or newer for local development
 - Africa's Talking sandbox or production credentials
-- CallMeBot API key for WhatsApp test confirmations
+- Telegram bot token and numeric chat ID for operator confirmations
 - Authorized E.164 routing channels for live emergency delivery
 - `make` for convenience targets
 
@@ -176,12 +176,12 @@ Docker services use the internal hostnames `postgres` and `nats`, which are alre
 | `TWILIO_MESSAGING_SERVICE_SID` | optional | Alternative Twilio sender service |
 | `TWILIO_BASE_URL` | `https://api.twilio.com` | Twilio API origin |
 | `TWILIO_HTTP_TIMEOUT` | `15s` | Twilio HTTP timeout |
-| `WHATSAPP_NOTIFICATIONS_ENABLED` | `false` | Send operator WhatsApp confirmations |
-| `OPERATOR_WHATSAPP_NUMBER` | required if enabled | Operator WhatsApp destination |
-| `WHATSAPP_DRY_RUN` | `true` | Log instead of sending WhatsApp |
-| `CALLMEBOT_API_KEY` | required for live | CallMeBot activation key |
-| `CALLMEBOT_BASE_URL` | CallMeBot endpoint | CallMeBot WhatsApp API endpoint |
-| `CALLMEBOT_HTTP_TIMEOUT` | `20s` | CallMeBot HTTP timeout |
+| `TELEGRAM_NOTIFICATIONS_ENABLED` | `false` | Send operator Telegram confirmations |
+| `TELEGRAM_CHAT_ID` | required if enabled | Numeric Telegram chat ID |
+| `TELEGRAM_BOT_TOKEN` | required for live | Telegram BotFather token |
+| `TELEGRAM_API_BASE_URL` | `https://api.telegram.org` | Telegram Bot API origin |
+| `TELEGRAM_HTTP_TIMEOUT` | `20s` | Telegram HTTP timeout |
+| `TELEGRAM_DRY_RUN` | `true` | Log instead of sending Telegram |
 | `RETRY_INITIAL_DELAY` | `2s` | First retry delay |
 | `RETRY_MAX_DELAY` | `5m` | Retry delay cap |
 | `RETRY_MAX_ATTEMPTS` | `5` | Retry attempt limit |
@@ -417,33 +417,30 @@ EMERGENCY_GENDARMERIE_PHONE=+213...
 EMERGENCY_POLICE_PHONE=+213...
 ```
 
-### WhatsApp operator confirmation
+### Telegram operator confirmation
 
-The emergency numbers can be kept as placeholders while WhatsApp is used for test confirmation. CallMeBot is configured as the WhatsApp provider:
+The emergency numbers can be kept as placeholders while Telegram is used for operator confirmation:
 
 ```env
-WHATSAPP_NOTIFICATIONS_ENABLED=true
-OPERATOR_WHATSAPP_NUMBER=+213794591246
-WHATSAPP_DRY_RUN=false
-CALLMEBOT_API_KEY=your-callmebot-api-key
-CALLMEBOT_BASE_URL=https://api.callmebot.com/whatsapp.php
-CALLMEBOT_HTTP_TIMEOUT=20s
+TELEGRAM_NOTIFICATIONS_ENABLED=true
+TELEGRAM_CHAT_ID=123456789
+TELEGRAM_BOT_TOKEN=your-botfather-token
+TELEGRAM_API_BASE_URL=https://api.telegram.org
+TELEGRAM_HTTP_TIMEOUT=20s
+TELEGRAM_DRY_RUN=false
 ```
 
-The worker still creates the three placeholder emergency notifications and adds a fourth notification with service `operator_whatsapp`. The WhatsApp message contains the accident reference, coordinates, damage, radius, and the status of each emergency recipient.
+The worker still creates the three placeholder emergency notifications and adds a fourth notification with service `operator_telegram`. The Telegram message contains the accident reference, coordinates, damage, radius, and the status of each emergency recipient.
 
-CallMeBot activation:
+Telegram setup:
 
-1. Open the CallMeBot WhatsApp API setup page.
-2. Add the currently displayed CallMeBot phone number to your contacts.
-3. From the destination WhatsApp account, send `I allow callmebot to send me messages`.
-4. Wait for the reply containing `APIKEY`.
-5. Set `CALLMEBOT_API_KEY` and `WHATSAPP_DRY_RUN=false`.
-6. Restart the worker.
+1. Create a bot with Telegram `@BotFather`.
+2. Start a conversation with the bot and send `/start`.
+3. Obtain the numeric chat ID from `getUpdates` or a Telegram ID bot.
+4. Set `TELEGRAM_CHAT_ID`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_DRY_RUN=false`.
+5. Restart the worker.
 
-CallMeBot is an unofficial personal-use service and its onboarding availability can be full. Do not use it as the only channel for real emergency notifications.
-
-The default emergency recipients remain labels unless an authorized local SMS gateway is connected. The WhatsApp summary explicitly says the emergency notifications are experimental, so it never claims a real emergency service received an alert.
+The default emergency recipients remain labels unless an authorized local SMS gateway is connected. The Telegram summary explicitly says the emergency notifications are experimental, so it never claims a real emergency service received an alert.
 
 ### Test the accident pipeline
 
@@ -552,6 +549,13 @@ Validate the OpenAPI file:
 
 ```sh
 make swagger-check
+```
+
+Run the API load test:
+
+```sh
+BASE_URL=http://localhost:18080 API_KEY=change-me \
+k6 run tests/k6/api.js
 ```
 
 ## Operations

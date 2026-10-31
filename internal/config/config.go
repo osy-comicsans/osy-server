@@ -30,9 +30,8 @@ type Config struct {
 	Retry         Retry
 	Outbox        Outbox
 	Twilio        Twilio
-	CallMeBot     CallMeBot
 	Notifications Notifications
-	WhatsApp      WhatsApp
+	Telegram      Telegram
 	Auth          Auth
 	Documents     Documents
 }
@@ -111,16 +110,13 @@ type Notifications struct {
 	PolicePhone          string
 }
 
-type WhatsApp struct {
-	Enabled bool
-	To      string
-	DryRun  bool
-}
-
-type CallMeBot struct {
-	APIKey      string
+type Telegram struct {
+	Enabled     bool
+	ChatID      string
+	BotToken    string
 	BaseURL     string
 	HTTPTimeout time.Duration
+	DryRun      bool
 }
 
 func Load() (*Config, error) {
@@ -216,20 +212,18 @@ func Load() (*Config, error) {
 			GendarmeriePhone:     env("EMERGENCY_GENDARMERIE_PHONE", "1055"),
 			PolicePhone:          env("EMERGENCY_POLICE_PHONE", "1548"),
 		},
-		WhatsApp: WhatsApp{
-			Enabled: boolValue("WHATSAPP_NOTIFICATIONS_ENABLED", false),
-			To:      env("OPERATOR_WHATSAPP_NUMBER", ""),
-			DryRun:  boolValue("WHATSAPP_DRY_RUN", true),
-		},
 		Auth: Auth{
 			TokenSecret:     env("AUTH_TOKEN_SECRET", ""),
 			AccessTokenTTL:  duration("AUTH_ACCESS_TOKEN_TTL", 15*time.Minute),
 			RefreshTokenTTL: duration("AUTH_REFRESH_TOKEN_TTL", 30*24*time.Hour),
 		},
-		CallMeBot: CallMeBot{
-			APIKey:      env("CALLMEBOT_API_KEY", ""),
-			BaseURL:     env("CALLMEBOT_BASE_URL", "https://api.callmebot.com/whatsapp.php"),
-			HTTPTimeout: duration("CALLMEBOT_HTTP_TIMEOUT", 20*time.Second),
+		Telegram: Telegram{
+			Enabled:     boolValue("TELEGRAM_NOTIFICATIONS_ENABLED", false),
+			ChatID:      env("TELEGRAM_CHAT_ID", ""),
+			BotToken:    env("TELEGRAM_BOT_TOKEN", ""),
+			BaseURL:     env("TELEGRAM_API_BASE_URL", "https://api.telegram.org"),
+			HTTPTimeout: duration("TELEGRAM_HTTP_TIMEOUT", 20*time.Second),
+			DryRun:      boolValue("TELEGRAM_DRY_RUN", true),
 		},
 	}
 
@@ -364,22 +358,20 @@ func (c *Config) ValidateDocuments() error {
 
 func (c *Config) ValidateNotifications() error {
 	var errs []error
-	if c.WhatsApp.Enabled {
-		if strings.TrimSpace(c.WhatsApp.To) == "" {
-			errs = append(errs, errors.New("OPERATOR_WHATSAPP_NUMBER is required when WhatsApp notifications are enabled"))
-		} else if !isE164(c.WhatsApp.To) {
-			errs = append(errs, errors.New("OPERATOR_WHATSAPP_NUMBER must be E.164"))
+	if c.Telegram.Enabled {
+		if strings.TrimSpace(c.Telegram.ChatID) == "" {
+			errs = append(errs, errors.New("TELEGRAM_CHAT_ID is required when Telegram notifications are enabled"))
 		}
-		if !c.WhatsApp.DryRun {
-			if strings.TrimSpace(c.CallMeBot.APIKey) == "" {
-				errs = append(errs, errors.New("CALLMEBOT_API_KEY is required when WhatsApp is live"))
+		if !c.Telegram.DryRun {
+			if strings.TrimSpace(c.Telegram.BotToken) == "" {
+				errs = append(errs, errors.New("TELEGRAM_BOT_TOKEN is required when Telegram is live"))
 			}
-			parsed, err := url.Parse(c.CallMeBot.BaseURL)
+			parsed, err := url.Parse(c.Telegram.BaseURL)
 			if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-				errs = append(errs, errors.New("CALLMEBOT_BASE_URL must be a valid http or https URL"))
+				errs = append(errs, errors.New("TELEGRAM_API_BASE_URL must be a valid http or https URL"))
 			}
-			if c.CallMeBot.HTTPTimeout <= 0 {
-				errs = append(errs, errors.New("CALLMEBOT_HTTP_TIMEOUT must be positive"))
+			if c.Telegram.HTTPTimeout <= 0 {
+				errs = append(errs, errors.New("TELEGRAM_HTTP_TIMEOUT must be positive"))
 			}
 		}
 	}
