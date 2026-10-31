@@ -26,20 +26,20 @@ type NotificationStore interface {
 type Notifier struct {
 	store          NotificationStore
 	sender         NotificationSender
-	whatsAppSender NotificationSender
+	operatorSender NotificationSender
 	workers        int
 	retryPolicy    retry.Policy
 	logger         *slog.Logger
 }
 
-func NewNotifier(store NotificationStore, sender, whatsAppSender NotificationSender, workers int, retryPolicy retry.Policy, logger *slog.Logger) *Notifier {
+func NewNotifier(store NotificationStore, sender, operatorSender NotificationSender, workers int, retryPolicy retry.Policy, logger *slog.Logger) *Notifier {
 	if workers < 1 {
 		workers = 1
 	}
 	return &Notifier{
 		store:          store,
 		sender:         sender,
-		whatsAppSender: whatsAppSender,
+		operatorSender: operatorSender,
 		workers:        workers,
 		retryPolicy:    retryPolicy,
 		logger:         logger,
@@ -84,8 +84,8 @@ func (n *Notifier) Notify(ctx context.Context, notifications []database.Emergenc
 
 func (n *Notifier) deliver(ctx context.Context, notification database.EmergencyNotification) error {
 	sender := n.sender
-	if notification.Service == accident.OperatorWhatsAppService {
-		sender = n.whatsAppSender
+	if notification.Service == accident.OperatorTelegramService {
+		sender = n.operatorSender
 	}
 	if sender == nil {
 		return fmt.Errorf("no sender configured for notification service %s", notification.Service)

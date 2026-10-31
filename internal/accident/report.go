@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const OperatorWhatsAppService = "operator_whatsapp"
+const OperatorTelegramService = "operator_telegram"
 
 type Report struct {
 	Latitude         float64 `json:"latitude"`
@@ -123,7 +123,7 @@ func DefaultTargets(civilProtection, gendarmerie, police string) []Target {
 	}
 }
 
-func BuildAlerts(report Report, providerMessageID string, targets []Target, whatsAppTo string) []Alert {
+func BuildAlerts(report Report, providerMessageID string, targets []Target, operatorChatID string) []Alert {
 	alerts := make([]Alert, 0, len(targets)+1)
 	for _, target := range targets {
 		if strings.TrimSpace(target.Phone) == "" {
@@ -135,17 +135,17 @@ func BuildAlerts(report Report, providerMessageID string, targets []Target, what
 			Message: arabicMessage(target, report, providerMessageID),
 		})
 	}
-	if strings.TrimSpace(whatsAppTo) != "" {
+	if strings.TrimSpace(operatorChatID) != "" {
 		alerts = append(alerts, Alert{
-			Service: OperatorWhatsAppService,
-			Phone:   whatsAppTo,
-			Message: whatsAppMessage(report, providerMessageID, targets),
+			Service: OperatorTelegramService,
+			Phone:   operatorChatID,
+			Message: operatorMessage(report, providerMessageID, targets),
 		})
 	}
 	return alerts
 }
 
-func whatsAppMessage(report Report, reference string, targets []Target) string {
+func operatorMessage(report Report, reference string, targets []Target) string {
 	recipients := make([]string, 0, len(targets))
 	for _, target := range targets {
 		recipients = append(recipients, fmt.Sprintf("%s (%s): إشعار تجريبي", target.ArabicName, target.Phone))
